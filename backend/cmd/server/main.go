@@ -121,6 +121,7 @@ func main() {
 	api := handlers.NewAPI(database)
 
 	router := gin.Default()
+	router.Use(handlers.CORS())
 	router.GET("/healthz", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"status": "ok"})
 	})
