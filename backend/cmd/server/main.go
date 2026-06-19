@@ -47,7 +47,6 @@ func main() {
 	}
 	defer redisClient.Close()
 	finnhubLimiter := rediscache.NewLimiter(redisClient, rediscache.FinnhubCallLimit, time.Minute)
-	_ = finnhubLimiter // wired into the IPO cron in Phase 2
 	log.Println("startup: connected to Redis")
 
 	hub := handlers.NewHub()
@@ -60,6 +59,9 @@ func main() {
 
 	congressPoller := congress.NewPoller(database)
 	go congressPoller.Start(ctx)
+
+	ipoPoller := finnhub.NewIPOPoller(database, cfg.FinnhubAPIKey, finnhubLimiter)
+	go ipoPoller.Start(ctx)
 
 	api := handlers.NewAPI(database)
 

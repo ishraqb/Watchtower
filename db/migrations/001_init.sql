@@ -62,5 +62,8 @@ CREATE TABLE IF NOT EXISTS ipo_evaluations (
     expected_date DATE,
     risk_score    INT,
     sector        VARCHAR,
+    exchange      VARCHAR,
+    price_range   VARCHAR,
+    shares_value  BIGINT,
     UNIQUE (symbol, expected_date)
 );
