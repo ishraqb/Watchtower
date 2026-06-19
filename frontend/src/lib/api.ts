@@ -8,3 +8,19 @@ export async function getJSON<T>(path: string): Promise<T> {
 	}
 	return (await res.json()) as T;
 }
+
+// Last-known price snapshot returned by GET /api/quote/:symbol.
+export interface Quote {
+	symbol: string;
+	current: number;
+	change: number;
+	percent_change: number;
+	high: number;
+	low: number;
+	open: number;
+	previous_close: number;
+}
+
+export function getQuote(symbol: string): Promise<Quote> {
+	return getJSON<Quote>(`/api/quote/${encodeURIComponent(symbol)}`);
+}

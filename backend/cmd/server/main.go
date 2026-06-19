@@ -118,7 +118,7 @@ func main() {
 	ipoPoller := finnhub.NewIPOPoller(database, cfg.FinnhubAPIKey, finnhubLimiter)
 	go ipoPoller.Start(ctx)
 
-	api := handlers.NewAPI(database)
+	api := handlers.NewAPI(database, cfg.FinnhubAPIKey, finnhubLimiter)
 
 	router := gin.Default()
 	router.Use(handlers.CORS())
@@ -128,6 +128,7 @@ func main() {
 	router.GET("/ws", hub.HandleWS)
 	router.GET("/api/congress/:symbol", api.GetCongressBySymbol)
 	router.GET("/api/ipo", api.GetIPOs)
+	router.GET("/api/quote/:symbol", api.GetQuote)
 
 	// Dev-only: simulate a volume spike to exercise the full pipeline off-hours.
 	// Guarded by an env flag so it is never reachable in production.

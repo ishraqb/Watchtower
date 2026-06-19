@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"net/http"
 	"regexp"
 	"strings"
@@ -9,16 +10,24 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/ishraqb/Watchtower/backend/internal/db"
+	"github.com/ishraqb/Watchtower/backend/internal/finnhub"
 )
+
+// rateLimiter is the limiter contract the API depends on (decoupled from redis).
+type rateLimiter interface {
+	Allow(ctx context.Context, key string) (bool, error)
+}
 
 // API holds dependencies for the REST endpoints.
 type API struct {
-	db *db.DB
+	db         *db.DB
+	finnhubKey string
+	limiter    rateLimiter
 }
 
 // NewAPI builds the REST API handler set.
-func NewAPI(database *db.DB) *API {
-	return &API{db: database}
+func NewAPI(database *db.DB, finnhubKey string, limiter rateLimiter) *API {
+	return &API{db: database, finnhubKey: finnhubKey, limiter: limiter}
 }
 
 // symbolParam validates a user-supplied ticker before it touches a query.
@@ -127,4 +136,29 @@ func (a *API) GetIPOs(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"ipos": ipos})
+}
+
+// GetQuote handles GET /api/quote/:symbol, returning the last-known price and
+// day stats from Finnhub. Used to populate the dashboard when markets are closed.
+func (a *API) GetQuote(c *gin.Context) {
+	symbol := strings.ToUpper(c.Param("symbol"))
+	if !symbolParam.MatchString(symbol) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid symbol"})
+		return
+	}
+
+	// Gate the outbound Finnhub call through the shared rate limiter.
+	if a.limiter != nil {
+		if allowed, err := a.limiter.Allow(c.Request.Context(), "finnhub:rest"); err == nil && !allowed {
+			c.JSON(http.StatusTooManyRequests, gin.H{"error": "rate limit exceeded, please retry shortly"})
+			return
+		}
+	}
+
+	quote, err := finnhub.FetchQuote(c.Request.Context(), a.finnhubKey, symbol)
+	if err != nil {
+		c.JSON(http.StatusBadGateway, gin.H{"error": "failed to fetch quote"})
+		return
+	}
+	c.JSON(http.StatusOK, quote)
 }
