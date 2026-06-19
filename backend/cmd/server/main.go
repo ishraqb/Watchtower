@@ -40,6 +40,16 @@ type wsSentimentPayload struct {
 	TopHeadline    string  `json:"top_headline"`
 }
 
+// wsAnomalyPayload is broadcast the moment a volume spike is detected.
+type wsAnomalyPayload struct {
+	Type          string  `json:"type"`
+	EventID       int     `json:"event_id"`
+	Symbol        string  `json:"symbol"`
+	TriggerVolume int     `json:"trigger_volume"`
+	AvgVolume     float64 `json:"avg_volume"`
+	Time          int64   `json:"time"`
+}
+
 func main() {
 	cfg := config.Load()
 
@@ -180,7 +190,7 @@ func consumeTicks(ctx context.Context, database *db.DB, hub *handlers.Hub, fh *f
 			}
 
 			if det, fired := detector.Observe(tick); fired {
-				handleAnomaly(database, producer, tick, det)
+				handleAnomaly(database, producer, hub, tick, det)
 			}
 		}
 	}
@@ -188,7 +198,7 @@ func consumeTicks(ctx context.Context, database *db.DB, hub *handlers.Hub, fh *f
 
 // handleAnomaly persists a detected spike and publishes it to Kafka for the
 // sentiment worker. Failures are logged but never crash the tick stream.
-func handleAnomaly(database *db.DB, producer *kafka.Producer, tick db.Tick, det anomaly.Detection) {
+func handleAnomaly(database *db.DB, producer *kafka.Producer, hub *handlers.Hub, tick db.Tick, det anomaly.Detection) {
 	writeCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
@@ -196,6 +206,18 @@ func handleAnomaly(database *db.DB, producer *kafka.Producer, tick db.Tick, det 
 	if err != nil {
 		log.Printf("anomaly: insert failed: %v", err)
 		return
+	}
+
+	// Broadcast immediately so the UI shows the spike before sentiment returns.
+	if payload, err := json.Marshal(wsAnomalyPayload{
+		Type:          "anomaly",
+		EventID:       eventID,
+		Symbol:        det.Symbol,
+		TriggerVolume: det.TriggerVolume,
+		AvgVolume:     det.AvgVolume,
+		Time:          tick.Time.UnixMilli(),
+	}); err == nil {
+		hub.Broadcast(payload)
 	}
 
 	if err := producer.PublishAnomaly(kafka.AnomalyMessage{
