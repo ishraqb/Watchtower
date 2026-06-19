@@ -10,6 +10,18 @@ export interface Tick {
 
 export type ConnectionStatus = 'connecting' | 'open' | 'closed';
 
+/** A detected volume spike, with sentiment merged in once it arrives. */
+export interface Anomaly {
+	event_id: number;
+	symbol: string;
+	trigger_volume: number;
+	avg_volume: number;
+	time: number;
+	sentiment_score?: number;
+	article_count?: number;
+	top_headline?: string;
+}
+
 /** The most recent tick received, or null before the first message. */
 export const latestTick: Writable<Tick | null> = writable(null);
 
@@ -18,6 +30,11 @@ export const connectionStatus: Writable<ConnectionStatus> = writable('closed');
 
 /** Latest known price keyed by symbol, for summary tiles. */
 export const prices: Writable<Record<string, Tick>> = writable({});
+
+/** Detected anomalies, newest first, with sentiment merged in by event_id. */
+export const anomalies: Writable<Anomaly[]> = writable([]);
+
+const MAX_ANOMALIES = 25;
 
 let socket: WebSocket | null = null;
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
@@ -37,10 +54,36 @@ export function connect(url = 'ws://localhost:8080/ws'): void {
 
 	socket.onmessage = (event) => {
 		try {
-			const tick = JSON.parse(event.data) as Tick;
-			if (tick.type !== 'tick') return;
-			latestTick.set(tick);
-			prices.update((p) => ({ ...p, [tick.symbol]: tick }));
+			const msg = JSON.parse(event.data) as { type: string } & Record<string, unknown>;
+			switch (msg.type) {
+				case 'tick': {
+					const tick = msg as unknown as Tick;
+					latestTick.set(tick);
+					prices.update((p) => ({ ...p, [tick.symbol]: tick }));
+					break;
+				}
+				case 'anomaly': {
+					const a = msg as unknown as Anomaly;
+					anomalies.update((list) => [a, ...list].slice(0, MAX_ANOMALIES));
+					break;
+				}
+				case 'sentiment': {
+					const s = msg as unknown as Anomaly;
+					anomalies.update((list) =>
+						list.map((a) =>
+							a.event_id === s.event_id
+								? {
+										...a,
+										sentiment_score: s.sentiment_score,
+										article_count: s.article_count,
+										top_headline: s.top_headline
+									}
+								: a
+						)
+					);
+					break;
+				}
+			}
 		} catch {
 			// Ignore malformed frames rather than crashing the stream.
 		}

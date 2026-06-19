@@ -1,6 +1,15 @@
 <script lang="ts">
 	import { onMount, onDestroy } from 'svelte';
-	import { connect, disconnect, latestTick, connectionStatus, prices, type Tick } from '$lib/ws';
+	import {
+		connect,
+		disconnect,
+		latestTick,
+		connectionStatus,
+		prices,
+		anomalies,
+		type Tick,
+		type Anomaly
+	} from '$lib/ws';
 	import { createSymbolChart, pushPrice, type SymbolChart } from '$lib/charts';
 
 	const SYMBOLS = ['AAPL', 'TSLA', 'RIVN'];
@@ -10,15 +19,35 @@
 
 	let status = $state<'connecting' | 'open' | 'closed'>('closed');
 	let latestPrices = $state<Record<string, Tick>>({});
+	let anomalyList = $state<Anomaly[]>([]);
 
 	const unsubStatus = connectionStatus.subscribe((s) => (status = s));
 	const unsubPrices = prices.subscribe((p) => (latestPrices = p));
+	const unsubAnomalies = anomalies.subscribe((a) => (anomalyList = a));
 
 	const unsubTick = latestTick.subscribe((tick) => {
 		if (!tick) return;
 		const sc = charts[tick.symbol];
 		if (sc) pushPrice(sc, tick.time, tick.price);
 	});
+
+	function sentimentColor(score: number | undefined): string {
+		if (score === undefined) return 'text-slate-400';
+		if (score > 0.05) return 'text-emerald-400';
+		if (score < -0.05) return 'text-rose-400';
+		return 'text-amber-400';
+	}
+
+	function sentimentLabel(score: number | undefined): string {
+		if (score === undefined) return 'analyzing…';
+		if (score > 0.05) return 'Positive';
+		if (score < -0.05) return 'Negative';
+		return 'Neutral';
+	}
+
+	function fmtTime(ms: number): string {
+		return new Date(ms).toLocaleTimeString('en-US');
+	}
 
 	onMount(() => {
 		for (const sym of SYMBOLS) {
@@ -33,6 +62,7 @@
 		unsubStatus();
 		unsubPrices();
 		unsubTick();
+		unsubAnomalies();
 		for (const sym of SYMBOLS) charts[sym]?.chart.remove();
 		disconnect();
 	});
@@ -67,26 +97,77 @@
 		</div>
 	</header>
 
-	<main class="p-6">
-		<div class="grid grid-cols-1 gap-6 lg:grid-cols-3">
-			{#each SYMBOLS as sym (sym)}
-				<section class="rounded-xl border border-slate-800 bg-slate-900/50 p-4">
-					<div class="mb-3 flex items-baseline justify-between">
-						<h2 class="text-lg font-semibold">{sym}</h2>
-						<span class="font-mono text-xl text-sky-400">
-							{latestPrices[sym] ? `$${latestPrices[sym].price.toFixed(2)}` : '—'}
-						</span>
-					</div>
-					<div bind:this={containers[sym]} class="h-64 w-full"></div>
-				</section>
-			{/each}
+	<main class="grid grid-cols-1 gap-6 p-6 xl:grid-cols-[1fr_22rem]">
+		<div>
+			<div class="grid grid-cols-1 gap-6 lg:grid-cols-3">
+				{#each SYMBOLS as sym (sym)}
+					<section class="rounded-xl border border-slate-800 bg-slate-900/50 p-4">
+						<div class="mb-3 flex items-baseline justify-between">
+							<h2 class="text-lg font-semibold">{sym}</h2>
+							<span class="font-mono text-xl text-sky-400">
+								{latestPrices[sym] ? `$${latestPrices[sym].price.toFixed(2)}` : '—'}
+							</span>
+						</div>
+						<div bind:this={containers[sym]} class="h-64 w-full"></div>
+					</section>
+				{/each}
+			</div>
+
+			{#if status !== 'open'}
+				<p class="mt-6 text-center text-sm text-slate-500">
+					Waiting for the backend WebSocket at <code>ws://localhost:8080/ws</code>. Markets only
+					stream ticks during US trading hours.
+				</p>
+			{/if}
 		</div>
 
-		{#if status !== 'open'}
-			<p class="mt-6 text-center text-sm text-slate-500">
-				Waiting for the backend WebSocket at <code>ws://localhost:8080/ws</code>. Markets only stream
-				ticks during US trading hours.
-			</p>
-		{/if}
+		<aside class="rounded-xl border border-slate-800 bg-slate-900/50 p-4">
+			<h2 class="mb-3 flex items-center gap-2 text-lg font-semibold">
+				Anomaly Feed
+				<span class="rounded-full bg-slate-800 px-2 py-0.5 text-xs text-slate-400">
+					{anomalyList.length}
+				</span>
+			</h2>
+
+			{#if anomalyList.length === 0}
+				<p class="text-sm text-slate-500">
+					No volume spikes detected yet. When a symbol's volume exceeds 3x its recent average, it
+					appears here and is automatically analyzed for news sentiment.
+				</p>
+			{:else}
+				<ul class="space-y-3">
+					{#each anomalyList as a (a.event_id)}
+						<li class="rounded-lg border border-slate-800 bg-slate-950 p-3">
+							<div class="flex items-center justify-between">
+								<span class="font-semibold text-sky-400">{a.symbol}</span>
+								<span class="text-xs text-slate-500">{fmtTime(a.time)}</span>
+							</div>
+							<p class="mt-1 text-xs text-slate-400">
+								Volume {a.trigger_volume.toLocaleString()} vs avg {Math.round(
+									a.avg_volume
+								).toLocaleString()}
+							</p>
+							<div class="mt-2 border-t border-slate-800 pt-2">
+								<div class="flex items-center justify-between text-sm">
+									<span class="text-slate-400">Sentiment</span>
+									<span class="font-semibold {sentimentColor(a.sentiment_score)}">
+										{sentimentLabel(a.sentiment_score)}
+										{#if a.sentiment_score !== undefined}
+											({a.sentiment_score.toFixed(2)})
+										{/if}
+									</span>
+								</div>
+								{#if a.top_headline}
+									<p class="mt-1 text-xs text-slate-400">
+										“{a.top_headline}”
+									</p>
+									<p class="mt-1 text-xs text-slate-600">{a.article_count} articles analyzed</p>
+								{/if}
+							</div>
+						</li>
+					{/each}
+				</ul>
+			{/if}
+		</aside>
 	</main>
 </div>
