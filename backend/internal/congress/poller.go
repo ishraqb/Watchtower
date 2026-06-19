@@ -1,3 +1,5 @@
+// Package congress pulls congressional stock disclosures on a schedule and
+// upserts them so the API can serve "who in Congress traded this ticker".
 package congress
 
 import (

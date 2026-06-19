@@ -1,3 +1,5 @@
+// Package redis gives us a go-redis client plus a small sliding-window rate
+// limiter we use to stay under Finnhub's free-tier request cap.
 package redis
 
 import (

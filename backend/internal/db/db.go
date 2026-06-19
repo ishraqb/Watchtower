@@ -1,3 +1,5 @@
+// Package db is the thin layer over TimescaleDB/Postgres. Ticks come in fast,
+// so writes are batched with COPY rather than one INSERT per tick.
 package db
 
 import (

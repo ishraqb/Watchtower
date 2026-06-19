@@ -1,3 +1,7 @@
+// Sentiment worker: reads volume anomalies off Kafka, pulls the company news
+// for that ticker, scores the headlines, and publishes the result back so the
+// backend can show it on the live feed. Kept as a separate service so the
+// scoring work never blocks the main tick ingestion path.
 import { Kafka, type Consumer, type Producer } from 'kafkajs';
 import Sentiment from 'sentiment';
 import { config, TOPIC_ANOMALIES, TOPIC_SENTIMENT } from './config.js';

@@ -1,3 +1,8 @@
+// Command server is the Watchtower backend. It wires everything together:
+// streams ticks from Finnhub, batches them into TimescaleDB, runs the anomaly
+// detector, hands spikes off to Kafka for sentiment analysis, and pushes
+// everything to the browser over a websocket. The cron pollers (congress, IPO)
+// run alongside it.
 package main
 
 import (

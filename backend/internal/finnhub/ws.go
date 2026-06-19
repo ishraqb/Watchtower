@@ -1,3 +1,5 @@
+// Package finnhub is everything that talks to Finnhub: the live trade
+// websocket (this file), one-off quotes, and the IPO calendar poller.
 package finnhub
 
 import (

@@ -1,3 +1,5 @@
+// Package marketdata grabs historical price series for the chart ranges.
+// Finnhub's candle endpoint is paid, so this pulls from Yahoo's chart API.
 package marketdata
 
 import (

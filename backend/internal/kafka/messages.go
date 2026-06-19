@@ -1,3 +1,5 @@
+// Package kafka is the glue between the Go backend and the TS sentiment worker:
+// the API publishes anomalies, the worker publishes sentiment back.
 package kafka
 
 import "time"

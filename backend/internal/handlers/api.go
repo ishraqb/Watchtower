@@ -1,3 +1,5 @@
+// Package handlers has the HTTP (REST) and websocket handlers, plus the small
+// hub that fans broadcasts out to connected browsers.
 package handlers
 
 import (

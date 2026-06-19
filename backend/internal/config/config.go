@@ -1,3 +1,5 @@
+// Package config loads runtime settings from the environment (and a .env file
+// during local dev). Secrets only ever live here, never in the logs.
 package config
 
 import (

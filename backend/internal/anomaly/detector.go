@@ -1,3 +1,6 @@
+// Package anomaly watches the live tick stream and flags unusual volume spikes.
+// The idea is simple: keep a short rolling window of recent volume per symbol
+// and shout when a tick blows way past the recent average.
 package anomaly
 
 import (
