@@ -11,11 +11,13 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/ishraqb/Watchtower/backend/internal/anomaly"
 	"github.com/ishraqb/Watchtower/backend/internal/config"
 	"github.com/ishraqb/Watchtower/backend/internal/congress"
 	"github.com/ishraqb/Watchtower/backend/internal/db"
 	"github.com/ishraqb/Watchtower/backend/internal/finnhub"
 	"github.com/ishraqb/Watchtower/backend/internal/handlers"
+	"github.com/ishraqb/Watchtower/backend/internal/kafka"
 	rediscache "github.com/ishraqb/Watchtower/backend/internal/redis"
 )
 
@@ -55,7 +57,15 @@ func main() {
 	fh := finnhub.NewClient(cfg.FinnhubAPIKey, finnhub.DefaultSymbols)
 	go fh.Run(ctx)
 
-	go consumeTicks(ctx, database, hub, fh)
+	producer, err := kafka.NewProducer(cfg.KafkaBrokers)
+	if err != nil {
+		log.Fatalf("startup: %v", err)
+	}
+	defer producer.Close()
+	detector := anomaly.NewDetector()
+	log.Println("startup: connected to Kafka producer")
+
+	go consumeTicks(ctx, database, hub, fh, detector, producer)
 
 	congressPoller := congress.NewPoller(database)
 	go congressPoller.Start(ctx)
@@ -93,8 +103,9 @@ func main() {
 	_ = srv.Shutdown(shutdownCtx)
 }
 
-// consumeTicks fans each tick out to: a batched DB writer and the browser hub.
-func consumeTicks(ctx context.Context, database *db.DB, hub *handlers.Hub, fh *finnhub.Client) {
+// consumeTicks fans each tick out to: a batched DB writer, the browser hub,
+// and the anomaly detector (which publishes spikes to Kafka).
+func consumeTicks(ctx context.Context, database *db.DB, hub *handlers.Hub, fh *finnhub.Client, detector *anomaly.Detector, producer *kafka.Producer) {
 	const batchSize = 100
 	const flushInterval = 2 * time.Second
 
@@ -137,6 +148,35 @@ func consumeTicks(ctx context.Context, database *db.DB, hub *handlers.Hub, fh *f
 			if err == nil {
 				hub.Broadcast(payload)
 			}
+
+			if det, fired := detector.Observe(tick); fired {
+				handleAnomaly(database, producer, tick, det)
+			}
 		}
 	}
+}
+
+// handleAnomaly persists a detected spike and publishes it to Kafka for the
+// sentiment worker. Failures are logged but never crash the tick stream.
+func handleAnomaly(database *db.DB, producer *kafka.Producer, tick db.Tick, det anomaly.Detection) {
+	writeCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	eventID, err := database.InsertAnomaly(writeCtx, tick.Time, det.Symbol, "VOLUME_SPIKE", float64(det.TriggerVolume))
+	if err != nil {
+		log.Printf("anomaly: insert failed: %v", err)
+		return
+	}
+
+	if err := producer.PublishAnomaly(kafka.AnomalyMessage{
+		EventID:       eventID,
+		Symbol:        det.Symbol,
+		Time:          tick.Time,
+		TriggerVolume: det.TriggerVolume,
+		AvgVolume:     det.AvgVolume,
+	}); err != nil {
+		log.Printf("anomaly: publish failed: %v", err)
+		return
+	}
+	log.Printf("anomaly: %s volume %d vs avg %.0f -> event %d published", det.Symbol, det.TriggerVolume, det.AvgVolume, eventID)
 }
