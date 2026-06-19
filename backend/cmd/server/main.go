@@ -129,6 +129,7 @@ func main() {
 	router.GET("/api/congress/:symbol", api.GetCongressBySymbol)
 	router.GET("/api/ipo", api.GetIPOs)
 	router.GET("/api/quote/:symbol", api.GetQuote)
+	router.GET("/api/history/:symbol", api.GetHistory)
 
 	// Dev-only: simulate a volume spike to exercise the full pipeline off-hours.
 	// Guarded by an env flag so it is never reachable in production.

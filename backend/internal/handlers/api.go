@@ -11,6 +11,7 @@ import (
 
 	"github.com/ishraqb/Watchtower/backend/internal/db"
 	"github.com/ishraqb/Watchtower/backend/internal/finnhub"
+	"github.com/ishraqb/Watchtower/backend/internal/marketdata"
 )
 
 // rateLimiter is the limiter contract the API depends on (decoupled from redis).
@@ -161,4 +162,27 @@ func (a *API) GetQuote(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, quote)
+}
+
+// GetHistory handles GET /api/history/:symbol?range=1d, returning a normalized
+// price series for the requested Robinhood-style range.
+func (a *API) GetHistory(c *gin.Context) {
+	symbol := strings.ToUpper(c.Param("symbol"))
+	if !symbolParam.MatchString(symbol) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid symbol"})
+		return
+	}
+
+	rangeKey := strings.ToLower(c.DefaultQuery("range", "1d"))
+	if !marketdata.AllowedRange(rangeKey) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid range"})
+		return
+	}
+
+	hist, err := marketdata.FetchHistory(c.Request.Context(), symbol, rangeKey)
+	if err != nil {
+		c.JSON(http.StatusBadGateway, gin.H{"error": "failed to fetch history"})
+		return
+	}
+	c.JSON(http.StatusOK, hist)
 }
