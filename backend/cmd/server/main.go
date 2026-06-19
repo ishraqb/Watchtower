@@ -19,6 +19,8 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/ishraqb/Watchtower/backend/internal/anomaly"
+	"github.com/ishraqb/Watchtower/backend/internal/broker"
+	"github.com/ishraqb/Watchtower/backend/internal/broker/redisstream"
 	"github.com/ishraqb/Watchtower/backend/internal/config"
 	"github.com/ishraqb/Watchtower/backend/internal/congress"
 	"github.com/ishraqb/Watchtower/backend/internal/db"
@@ -93,15 +95,11 @@ func main() {
 	fh := finnhub.NewClient(cfg.FinnhubAPIKey, finnhub.DefaultSymbols)
 	go fh.Run(ctx)
 
-	producer, err := kafka.NewProducer(cfg.KafkaBrokers)
-	if err != nil {
-		log.Fatalf("startup: %v", err)
-	}
-	defer producer.Close()
 	detector := anomaly.NewDetector()
-	log.Println("startup: connected to Kafka producer")
 
-	sentimentConsumer, err := kafka.NewConsumer(cfg.KafkaBrokers, "watchtower-backend", func(msg kafka.SentimentMessage) {
+	// When a sentiment result comes back (from whichever broker), push it to the
+	// browsers. Same handler for Kafka and Redis Streams.
+	onSentiment := func(msg broker.SentimentMessage) {
 		payload, err := json.Marshal(wsSentimentPayload{
 			Type:           "sentiment",
 			EventID:        msg.EventID,
@@ -113,15 +111,34 @@ func main() {
 		if err == nil {
 			hub.Broadcast(payload)
 		}
-	})
-	if err != nil {
-		log.Fatalf("startup: %v", err)
 	}
+
+	// Pick the broker. Local/dev defaults to Kafka (what the project is built on);
+	// free hosting sets BROKER=redis since managed Kafka isn't free.
+	var publisher broker.AnomalyPublisher
+	var sentimentConsumer broker.SentimentConsumer
+	switch cfg.Broker {
+	case "redis":
+		publisher = redisstream.NewPublisher(redisClient.Raw(), cfg.WorkerWakeURL)
+		sentimentConsumer = redisstream.NewConsumer(redisClient.Raw(), "watchtower-backend", onSentiment)
+		log.Println("startup: using Redis Streams broker")
+	default:
+		p, err := kafka.NewProducer(cfg.KafkaBrokers)
+		if err != nil {
+			log.Fatalf("startup: %v", err)
+		}
+		c, err := kafka.NewConsumer(cfg.KafkaBrokers, "watchtower-backend", onSentiment)
+		if err != nil {
+			log.Fatalf("startup: %v", err)
+		}
+		publisher, sentimentConsumer = p, c
+		log.Println("startup: using Kafka broker")
+	}
+	defer publisher.Close()
 	defer sentimentConsumer.Close()
 	go sentimentConsumer.Run(ctx)
-	log.Println("startup: connected to Kafka consumer")
 
-	go consumeTicks(ctx, database, hub, fh, detector, producer)
+	go consumeTicks(ctx, database, hub, fh, detector, publisher)
 
 	congressPoller := congress.NewPoller(database)
 	go congressPoller.Start(ctx)
@@ -160,7 +177,7 @@ func main() {
 			}
 			synthetic := db.Tick{Time: time.Now(), Symbol: symbol, Price: 0, Volume: 100000}
 			det := anomaly.Detection{Symbol: symbol, TriggerVolume: 100000, AvgVolume: 1000}
-			handleAnomaly(database, producer, hub, synthetic, det)
+			handleAnomaly(database, publisher, hub, synthetic, det)
 			c.JSON(http.StatusAccepted, gin.H{"status": "anomaly simulated", "symbol": symbol})
 		})
 		log.Println("startup: dev endpoints ENABLED (POST /api/dev/simulate-anomaly/:symbol)")
@@ -187,8 +204,8 @@ func main() {
 }
 
 // consumeTicks fans each tick out to: a batched DB writer, the browser hub,
-// and the anomaly detector (which publishes spikes to Kafka).
-func consumeTicks(ctx context.Context, database *db.DB, hub *handlers.Hub, fh *finnhub.Client, detector *anomaly.Detector, producer *kafka.Producer) {
+// and the anomaly detector (which publishes spikes to the broker).
+func consumeTicks(ctx context.Context, database *db.DB, hub *handlers.Hub, fh *finnhub.Client, detector *anomaly.Detector, publisher broker.AnomalyPublisher) {
 	const batchSize = 100
 	const flushInterval = 2 * time.Second
 
@@ -233,15 +250,15 @@ func consumeTicks(ctx context.Context, database *db.DB, hub *handlers.Hub, fh *f
 			}
 
 			if det, fired := detector.Observe(tick); fired {
-				handleAnomaly(database, producer, hub, tick, det)
+				handleAnomaly(database, publisher, hub, tick, det)
 			}
 		}
 	}
 }
 
-// handleAnomaly persists a detected spike and publishes it to Kafka for the
+// handleAnomaly persists a detected spike and publishes it to the broker for the
 // sentiment worker. Failures are logged but never crash the tick stream.
-func handleAnomaly(database *db.DB, producer *kafka.Producer, hub *handlers.Hub, tick db.Tick, det anomaly.Detection) {
+func handleAnomaly(database *db.DB, publisher broker.AnomalyPublisher, hub *handlers.Hub, tick db.Tick, det anomaly.Detection) {
 	writeCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
@@ -263,7 +280,7 @@ func handleAnomaly(database *db.DB, producer *kafka.Producer, hub *handlers.Hub,
 		hub.Broadcast(payload)
 	}
 
-	if err := producer.PublishAnomaly(kafka.AnomalyMessage{
+	if err := publisher.PublishAnomaly(broker.AnomalyMessage{
 		EventID:       eventID,
 		Symbol:        det.Symbol,
 		Time:          tick.Time,

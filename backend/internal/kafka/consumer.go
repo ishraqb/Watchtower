@@ -7,19 +7,18 @@ import (
 	"strings"
 
 	"github.com/IBM/sarama"
-)
 
-// SentimentHandler is called for each sentiment result consumed from Kafka.
-type SentimentHandler func(SentimentMessage)
+	"github.com/ishraqb/Watchtower/backend/internal/broker"
+)
 
 // Consumer reads sentiment results and forwards them to a handler.
 type Consumer struct {
 	group   sarama.ConsumerGroup
-	handler SentimentHandler
+	handler broker.SentimentHandler
 }
 
 // NewConsumer joins a consumer group on the given brokers.
-func NewConsumer(brokers string, groupID string, handler SentimentHandler) (*Consumer, error) {
+func NewConsumer(brokers string, groupID string, handler broker.SentimentHandler) (*Consumer, error) {
 	cfg := sarama.NewConfig()
 	cfg.Consumer.Offsets.Initial = sarama.OffsetNewest
 	cfg.Consumer.Return.Errors = true
@@ -58,7 +57,7 @@ func (c *Consumer) Close() error {
 
 // groupHandler implements sarama.ConsumerGroupHandler.
 type groupHandler struct {
-	handler SentimentHandler
+	handler broker.SentimentHandler
 }
 
 func (h *groupHandler) Setup(sarama.ConsumerGroupSession) error   { return nil }
@@ -71,7 +70,7 @@ func (h *groupHandler) ConsumeClaim(session sarama.ConsumerGroupSession, claim s
 			if !ok {
 				return nil
 			}
-			var sentiment SentimentMessage
+			var sentiment broker.SentimentMessage
 			if err := json.Unmarshal(msg.Value, &sentiment); err != nil {
 				log.Printf("kafka consumer: bad message: %v", err)
 			} else {

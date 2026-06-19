@@ -17,6 +17,12 @@ type Config struct {
 	RedisURL      string
 	KafkaBrokers  string
 	ServerPort    string
+	// Broker selects the message broker: "kafka" (local/dev, the default) or
+	// "redis" (Redis Streams, used on free hosting where Kafka isn't available).
+	Broker string
+	// WorkerWakeURL, if set, is pinged after publishing an anomaly so a
+	// spun-down (free-tier) sentiment worker wakes up to process it.
+	WorkerWakeURL string
 	// AllowedOrigins is the list of browser origins allowed to call the API and
 	// open a websocket. Defaults to the local dev/preview servers; in production
 	// set ALLOWED_ORIGINS to your real frontend origin(s) so localhost isn't trusted.
@@ -40,6 +46,8 @@ func Load() *Config {
 		RedisURL:      os.Getenv("REDIS_URL"),
 		KafkaBrokers:  os.Getenv("KAFKA_BROKERS"),
 		ServerPort:    getOrDefault("SERVER_PORT", "8080"),
+		Broker:        getOrDefault("BROKER", "kafka"),
+		WorkerWakeURL: os.Getenv("WORKER_WAKE_URL"),
 
 		AllowedOrigins:     splitCSV(getOrDefault("ALLOWED_ORIGINS", "http://localhost:5173,http://localhost:4173")),
 		EnableDevEndpoints: os.Getenv("ENABLE_DEV_ENDPOINTS") == "true",

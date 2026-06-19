@@ -6,6 +6,8 @@ import (
 	"strings"
 
 	"github.com/IBM/sarama"
+
+	"github.com/ishraqb/Watchtower/backend/internal/broker"
 )
 
 // Producer publishes messages to Kafka topics.
@@ -30,7 +32,7 @@ func NewProducer(brokers string) (*Producer, error) {
 
 // PublishAnomaly serializes and sends an anomaly to TopicAnomalies, keyed by symbol
 // so that all events for one symbol land on the same partition (ordered).
-func (p *Producer) PublishAnomaly(msg AnomalyMessage) error {
+func (p *Producer) PublishAnomaly(msg broker.AnomalyMessage) error {
 	payload, err := json.Marshal(msg)
 	if err != nil {
 		return fmt.Errorf("kafka: marshal anomaly: %w", err)
