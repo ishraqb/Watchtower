@@ -81,7 +81,13 @@ func main() {
 	finnhubLimiter := rediscache.NewLimiter(redisClient, rediscache.FinnhubCallLimit, time.Minute)
 	log.Println("startup: connected to Redis")
 
-	hub := handlers.NewHub()
+	// Build the origin allow-list once (shared by CORS and the WS upgrader).
+	allowedOrigins := make(map[string]bool, len(cfg.AllowedOrigins))
+	for _, o := range cfg.AllowedOrigins {
+		allowedOrigins[o] = true
+	}
+
+	hub := handlers.NewHub(allowedOrigins)
 	go hub.Run()
 
 	fh := finnhub.NewClient(cfg.FinnhubAPIKey, finnhub.DefaultSymbols)
@@ -126,16 +132,22 @@ func main() {
 	api := handlers.NewAPI(database, cfg.FinnhubAPIKey, finnhubLimiter, fh)
 
 	router := gin.Default()
-	router.Use(handlers.CORS())
+	router.Use(handlers.CORS(allowedOrigins))
 	router.GET("/healthz", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"status": "ok"})
 	})
 	router.GET("/ws", hub.HandleWS)
-	router.GET("/api/congress/:symbol", api.GetCongressBySymbol)
-	router.GET("/api/ipo", api.GetIPOs)
-	router.GET("/api/quote/:symbol", api.GetQuote)
-	router.GET("/api/history/:symbol", api.GetHistory)
-	router.POST("/api/watch/:symbol", api.Watch)
+
+	// Per-IP inbound limit on the public API. There's no auth (it only serves
+	// public market data), so this is what keeps a single visitor from hammering
+	// the external-API proxy endpoints or spamming /api/watch.
+	inboundLimiter := rediscache.NewLimiter(redisClient, 120, time.Minute)
+	apiGroup := router.Group("/api", inboundLimiter.PerClient("ip"))
+	apiGroup.GET("/congress/:symbol", api.GetCongressBySymbol)
+	apiGroup.GET("/ipo", api.GetIPOs)
+	apiGroup.GET("/quote/:symbol", api.GetQuote)
+	apiGroup.GET("/history/:symbol", api.GetHistory)
+	apiGroup.POST("/watch/:symbol", api.Watch)
 
 	// Dev-only: simulate a volume spike to exercise the full pipeline off-hours.
 	// Guarded by an env flag so it is never reachable in production.

@@ -16,6 +16,7 @@ type Hub struct {
 	broadcast  chan []byte
 	register   chan *client
 	unregister chan *client
+	upgrader   websocket.Upgrader
 }
 
 type client struct {
@@ -23,33 +24,27 @@ type client struct {
 	send chan []byte
 }
 
-// allowedOrigins restricts which browser origins may open a WebSocket.
-// CSRF/WS safety: do not blindly accept all origins in production.
-var allowedOrigins = map[string]bool{
-	"http://localhost:5173": true, // SvelteKit dev server
-	"http://localhost:4173": true, // SvelteKit preview
-	"http://localhost:8080": true, // backend-served
-}
-
-var upgrader = websocket.Upgrader{
-	ReadBufferSize:  1024,
-	WriteBufferSize: 1024,
-	CheckOrigin: func(r *http.Request) bool {
-		origin := r.Header.Get("Origin")
-		if origin == "" {
-			return true // non-browser clients (e.g. tests) have no Origin
-		}
-		return allowedOrigins[origin]
-	},
-}
-
-// NewHub creates a hub ready to be started with Run.
-func NewHub() *Hub {
+// NewHub creates a hub ready to be started with Run. The allowed list restricts
+// which browser origins may open a WebSocket (CSRF/WS safety — never accept all
+// origins in production). An empty Origin (non-browser clients like tests) is
+// allowed; a present-but-unlisted origin is rejected.
+func NewHub(allowed map[string]bool) *Hub {
 	return &Hub{
 		clients:    make(map[*client]struct{}),
 		broadcast:  make(chan []byte, 256),
 		register:   make(chan *client),
 		unregister: make(chan *client),
+		upgrader: websocket.Upgrader{
+			ReadBufferSize:  1024,
+			WriteBufferSize: 1024,
+			CheckOrigin: func(r *http.Request) bool {
+				origin := r.Header.Get("Origin")
+				if origin == "" {
+					return true
+				}
+				return allowed[origin]
+			},
+		},
 	}
 }
 
@@ -95,7 +90,7 @@ func (h *Hub) Broadcast(msg []byte) {
 
 // HandleWS is the Gin handler that upgrades an HTTP request to a WebSocket.
 func (h *Hub) HandleWS(c *gin.Context) {
-	conn, err := upgrader.Upgrade(c.Writer, c.Request, nil)
+	conn, err := h.upgrader.Upgrade(c.Writer, c.Request, nil)
 	if err != nil {
 		// Generic client-facing error; details stay server-side only.
 		log.Printf("hub: websocket upgrade failed: %v", err)

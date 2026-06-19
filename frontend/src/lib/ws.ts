@@ -39,11 +39,16 @@ const MAX_ANOMALIES = 25;
 let socket: WebSocket | null = null;
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 
+// Backend WebSocket URL. Set VITE_WS_URL at build time for deployed
+// environments; falls back to the local backend during development.
+const DEFAULT_WS_URL =
+	(import.meta.env.VITE_WS_URL as string | undefined) ?? 'ws://localhost:8080/ws';
+
 /**
  * Opens a WebSocket to the Go backend and streams ticks into the stores.
  * Auto-reconnects with a fixed backoff. Browser-only (guarded for SSR).
  */
-export function connect(url = 'ws://localhost:8080/ws'): void {
+export function connect(url = DEFAULT_WS_URL): void {
 	if (typeof window === 'undefined') return; // no WebSocket during SSR
 	if (socket && socket.readyState <= WebSocket.OPEN) return;
 

@@ -78,3 +78,25 @@ func (l *Limiter) Middleware(key string) gin.HandlerFunc {
 		c.Next()
 	}
 }
+
+// PerClient rate-limits inbound requests per client IP under the given prefix.
+// Without auth, this is what stops a single visitor from hammering the public
+// proxy endpoints (quote/history) or spamming /api/watch. Note: behind a proxy
+// or CDN, configure Gin's trusted proxies so ClientIP() reflects the real
+// caller and can't be spoofed via X-Forwarded-For.
+func (l *Limiter) PerClient(prefix string) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		allowed, err := l.Allow(c.Request.Context(), prefix+":"+c.ClientIP())
+		if err != nil {
+			c.Next() // fail open on limiter errors
+			return
+		}
+		if !allowed {
+			c.AbortWithStatusJSON(http.StatusTooManyRequests, gin.H{
+				"error": "rate limit exceeded, please retry shortly",
+			})
+			return
+		}
+		c.Next()
+	}
+}

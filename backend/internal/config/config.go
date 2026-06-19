@@ -5,6 +5,7 @@ package config
 import (
 	"log"
 	"os"
+	"strings"
 
 	"github.com/joho/godotenv"
 )
@@ -16,6 +17,10 @@ type Config struct {
 	RedisURL      string
 	KafkaBrokers  string
 	ServerPort    string
+	// AllowedOrigins is the list of browser origins allowed to call the API and
+	// open a websocket. Defaults to the local dev/preview servers; in production
+	// set ALLOWED_ORIGINS to your real frontend origin(s) so localhost isn't trusted.
+	AllowedOrigins []string
 	// EnableDevEndpoints exposes local-only debug routes (e.g. anomaly simulation).
 	// Must stay false in production so debug operations are never publicly reachable.
 	EnableDevEndpoints bool
@@ -36,6 +41,7 @@ func Load() *Config {
 		KafkaBrokers:  os.Getenv("KAFKA_BROKERS"),
 		ServerPort:    getOrDefault("SERVER_PORT", "8080"),
 
+		AllowedOrigins:     splitCSV(getOrDefault("ALLOWED_ORIGINS", "http://localhost:5173,http://localhost:4173")),
 		EnableDevEndpoints: os.Getenv("ENABLE_DEV_ENDPOINTS") == "true",
 	}
 
@@ -55,4 +61,16 @@ func getOrDefault(key, fallback string) string {
 		return v
 	}
 	return fallback
+}
+
+// splitCSV turns a comma-separated env value into a trimmed, non-empty slice.
+func splitCSV(s string) []string {
+	parts := strings.Split(s, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if v := strings.TrimSpace(p); v != "" {
+			out = append(out, v)
+		}
+	}
+	return out
 }

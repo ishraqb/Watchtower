@@ -1,5 +1,7 @@
-// Base URL of the Go backend REST API.
-export const API_BASE = 'http://localhost:8080';
+// Base URL of the Go backend REST API. Set VITE_API_BASE at build time for
+// deployed environments; falls back to the local backend during development.
+export const API_BASE =
+	(import.meta.env.VITE_API_BASE as string | undefined) ?? 'http://localhost:8080';
 
 export async function getJSON<T>(path: string): Promise<T> {
 	const res = await fetch(`${API_BASE}${path}`);
