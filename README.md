@@ -2,6 +2,20 @@
 
 Watchtower is a live, event-driven market intelligence platform. It streams real-time stock prices, automatically flags unusual trading activity, and explains each spike with news sentiment - all on screen within seconds, no refresh. It also tracks US congressional stock disclosures and scores upcoming IPOs by risk.
 
+## Screenshots
+
+**Live dashboard** - real-time price charts with a watchlist and the anomaly/sentiment feed.
+
+![Watchtower live dashboard](docs/screenshots/dashboard.png)
+
+**IPO risk rater** - upcoming listings scored 0-100; each row opens a breakdown of the score.
+
+![Watchtower IPO risk rater](docs/screenshots/ipo.png)
+
+**Congressional trades** - recent House/Senate disclosures per ticker with buy/sell counts.
+
+![Watchtower congressional trades](docs/screenshots/congress.png)
+
 ## What it does
 
 - **Live dashboard** - real-time price charts streamed over a websocket, with a watchlist you can add to or remove from (up to 25 tickers, saved in your browser). When the market is closed it shows the last close and the day's stats.
