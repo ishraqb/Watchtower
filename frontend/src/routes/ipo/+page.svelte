@@ -1,6 +1,12 @@
 <script lang="ts">
 	import { getJSON } from '$lib/api';
 
+	interface RiskFactor {
+		label: string;
+		impact: number;
+		detail: string;
+	}
+
 	interface IPOEvaluation {
 		symbol: string;
 		company_name: string;
@@ -9,6 +15,7 @@
 		exchange: string;
 		price_range: string;
 		shares_value: number;
+		factors: RiskFactor[];
 	}
 
 	interface IPOResponse {
@@ -22,6 +29,21 @@
 	let error = $state('');
 	let sortKey = $state<SortKey>('expected_date');
 	let sortAsc = $state(true);
+	let selected = $state<IPOEvaluation | null>(null);
+
+	function openDetail(ipo: IPOEvaluation) {
+		selected = ipo;
+	}
+
+	function closeDetail() {
+		selected = null;
+	}
+
+	function impactColor(impact: number): string {
+		if (impact < 0) return 'text-emerald-300';
+		if (impact > 0) return 'text-rose-300';
+		return 'text-slate-300';
+	}
 
 	async function load() {
 		loading = true;
@@ -100,7 +122,9 @@
 		<div class="flex items-center justify-between">
 			<div>
 				<h1 class="text-2xl font-bold tracking-tight">IPO Risk Rater</h1>
-				<p class="text-sm text-slate-400">Upcoming listings scored by offering size and pricing</p>
+				<p class="text-sm text-slate-400">
+					Upcoming listings scored by offering size and pricing · click a row to see why
+				</p>
 			</div>
 			<nav class="flex gap-4 text-sm">
 				<a class="text-slate-400 hover:text-slate-200" href="/">Live</a>
@@ -145,7 +169,10 @@
 					</thead>
 					<tbody class="divide-y divide-slate-800">
 						{#each sorted as ipo (ipo.symbol + (ipo.expected_date ?? ''))}
-							<tr class="bg-slate-950 hover:bg-slate-900/50">
+							<tr
+								class="cursor-pointer bg-slate-950 hover:bg-slate-900/50"
+								onclick={() => openDetail(ipo)}
+							>
 								<td class="px-4 py-3 font-mono font-semibold text-sky-400">{ipo.symbol}</td>
 								<td class="px-4 py-3">{ipo.company_name}</td>
 								<td class="px-4 py-3 text-slate-400">{ipo.exchange || '—'}</td>
@@ -169,3 +196,84 @@
 		{/if}
 	</main>
 </div>
+
+<svelte:window
+	onkeydown={(e) => {
+		if (e.key === 'Escape') closeDetail();
+	}}
+/>
+
+{#if selected}
+	<!-- Backdrop: clicking the backdrop itself (not the panel) closes the modal -->
+	<div
+		class="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4"
+		role="presentation"
+		onclick={(e) => {
+			if (e.target === e.currentTarget) closeDetail();
+		}}
+	>
+		<div
+			class="max-h-[85vh] w-full max-w-lg overflow-y-auto rounded-xl border border-slate-800 bg-slate-900 p-6 shadow-2xl"
+			role="dialog"
+			aria-modal="true"
+			aria-label="IPO rating details"
+			tabindex="-1"
+		>
+			<div class="flex items-start justify-between">
+				<div>
+					<h2 class="font-mono text-xl font-semibold text-sky-400">{selected.symbol}</h2>
+					<p class="text-sm text-slate-300">{selected.company_name}</p>
+				</div>
+				<button
+					class="rounded-md px-2 py-1 text-slate-400 hover:bg-slate-800 hover:text-slate-200"
+					onclick={closeDetail}
+					aria-label="Close"
+				>
+					✕
+				</button>
+			</div>
+
+			<div class="mt-4 grid grid-cols-3 gap-3 text-sm">
+				<div class="rounded-lg bg-slate-950 p-3">
+					<div class="text-xs text-slate-500">Exchange</div>
+					<div class="text-slate-200">{selected.exchange || '—'}</div>
+				</div>
+				<div class="rounded-lg bg-slate-950 p-3">
+					<div class="text-xs text-slate-500">Price</div>
+					<div class="text-slate-200">{selected.price_range || '—'}</div>
+				</div>
+				<div class="rounded-lg bg-slate-950 p-3">
+					<div class="text-xs text-slate-500">Raise</div>
+					<div class="text-slate-200">{fmtValue(selected.shares_value)}</div>
+				</div>
+			</div>
+
+			<div class="mt-5 flex items-center justify-between">
+				<span class="text-sm text-slate-400">Risk rating</span>
+				<span
+					class="rounded-full px-3 py-1 text-sm font-semibold {riskClasses(selected.risk_score)}"
+				>
+					{riskLabel(selected.risk_score)} · {selected.risk_score} / 100
+				</span>
+			</div>
+
+			<h3 class="mt-5 mb-2 text-sm font-semibold text-slate-200">How this score was calculated</h3>
+			<ul class="space-y-2">
+				{#each selected.factors as f (f.label + f.detail)}
+					<li class="rounded-lg border border-slate-800 bg-slate-950 p-3">
+						<div class="flex items-center justify-between">
+							<span class="text-sm font-medium text-slate-200">{f.label}</span>
+							<span class="font-mono text-sm font-semibold {impactColor(f.impact)}">
+								{f.impact > 0 ? '+' : ''}{f.impact}
+							</span>
+						</div>
+						<p class="mt-1 text-xs text-slate-400">{f.detail}</p>
+					</li>
+				{/each}
+			</ul>
+			<p class="mt-3 text-xs text-slate-500">
+				Higher scores mean higher risk. Green factors reduce risk; red factors increase it.
+			</p>
+		</div>
+	</div>
+{/if}
