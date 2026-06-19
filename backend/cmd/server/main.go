@@ -15,6 +15,7 @@ import (
 	"github.com/ishraqb/Watchtower/backend/internal/db"
 	"github.com/ishraqb/Watchtower/backend/internal/finnhub"
 	"github.com/ishraqb/Watchtower/backend/internal/handlers"
+	rediscache "github.com/ishraqb/Watchtower/backend/internal/redis"
 )
 
 // wsTickPayload is the JSON shape broadcast to browser clients.
@@ -38,6 +39,15 @@ func main() {
 	}
 	defer database.Close()
 	log.Println("startup: connected to TimescaleDB")
+
+	redisClient, err := rediscache.New(ctx, cfg.RedisURL)
+	if err != nil {
+		log.Fatalf("startup: %v", err)
+	}
+	defer redisClient.Close()
+	finnhubLimiter := rediscache.NewLimiter(redisClient, rediscache.FinnhubCallLimit, time.Minute)
+	_ = finnhubLimiter // wired into the IPO cron in Phase 2
+	log.Println("startup: connected to Redis")
 
 	hub := handlers.NewHub()
 	go hub.Run()
