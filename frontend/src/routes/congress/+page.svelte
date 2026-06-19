@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { getJSON } from '$lib/api';
+	import Nav from '$lib/Nav.svelte';
 
 	interface CongressTrade {
 		symbol: string;
@@ -55,28 +56,21 @@
 	<title>Watchtower — Congressional Trades</title>
 </svelte:head>
 
-<div class="min-h-screen bg-slate-950 text-slate-100">
-	<header class="border-b border-slate-800 px-6 py-4">
-		<div class="flex items-center justify-between">
-			<div>
-				<h1 class="text-2xl font-bold tracking-tight">Congressional Trades</h1>
-				<p class="text-sm text-slate-400">STOCK Act disclosures from the House and Senate</p>
-			</div>
-			<nav class="flex gap-4 text-sm">
-				<a class="text-slate-400 hover:text-slate-200" href="/">Live</a>
-				<a class="text-sky-400 hover:text-sky-300" href="/congress">Congress</a>
-				<a class="text-slate-400 hover:text-slate-200" href="/ipo">IPOs</a>
-			</nav>
-		</div>
-	</header>
+<div class="min-h-screen">
+	<Nav active="congress" />
 
-	<main class="p-6">
+	<main class="mx-auto max-w-5xl px-6 py-8">
+		<div class="mb-8">
+			<h1 class="text-3xl font-bold tracking-tight text-white">Congressional Trades</h1>
+			<p class="mt-1 text-sm text-[#9a9a9a]">STOCK Act disclosures from the House and Senate</p>
+		</div>
+
 		<div class="mb-6 flex flex-wrap gap-2">
 			{#each SYMBOLS as sym (sym)}
 				<button
-					class="rounded-lg px-3 py-1.5 text-sm font-medium transition-colors {selected === sym
-						? 'bg-sky-500 text-white'
-						: 'bg-slate-800 text-slate-300 hover:bg-slate-700'}"
+					class="rounded-full px-4 py-1.5 text-sm font-semibold transition-colors {selected === sym
+						? 'bg-white text-black'
+						: 'bg-[#1a1a1a] text-[#9a9a9a] hover:bg-[#242424] hover:text-white'}"
 					onclick={() => (selected = sym)}
 				>
 					{sym}
@@ -84,50 +78,45 @@
 			{/each}
 		</div>
 
-		<div class="mb-4 flex gap-4">
-			<div class="rounded-lg border border-slate-800 bg-slate-900/50 px-4 py-2">
-				<span class="text-xs text-slate-400">Buys</span>
-				<p class="text-xl font-bold text-emerald-400">{buyCount}</p>
+		<div class="mb-6 flex gap-3">
+			<div class="flex-1 rounded-2xl bg-[#141414] px-5 py-4">
+				<span class="text-xs uppercase tracking-wide text-[#6a6a6a]">Buys</span>
+				<p class="tnum text-2xl font-bold text-[#00c805]">{buyCount}</p>
 			</div>
-			<div class="rounded-lg border border-slate-800 bg-slate-900/50 px-4 py-2">
-				<span class="text-xs text-slate-400">Sells</span>
-				<p class="text-xl font-bold text-rose-400">{sellCount}</p>
+			<div class="flex-1 rounded-2xl bg-[#141414] px-5 py-4">
+				<span class="text-xs uppercase tracking-wide text-[#6a6a6a]">Sells</span>
+				<p class="tnum text-2xl font-bold text-[#ff5000]">{sellCount}</p>
 			</div>
 		</div>
 
 		{#if loading}
-			<p class="text-slate-400">Loading {selected} trades…</p>
+			<p class="text-[#9a9a9a]">Loading {selected} trades…</p>
 		{:else if error}
-			<p class="rounded-lg border border-rose-900 bg-rose-950/50 px-4 py-3 text-rose-300">{error}</p>
+			<p class="rounded-xl bg-[#1a0d0a] px-4 py-3 text-[#ff5000]">{error}</p>
 		{:else if trades.length === 0}
-			<p class="text-slate-400">No disclosed trades found for {selected}.</p>
+			<p class="text-[#9a9a9a]">No disclosed trades found for {selected}.</p>
 		{:else}
-			<div class="overflow-hidden rounded-xl border border-slate-800">
+			<div class="overflow-hidden rounded-2xl bg-[#141414]">
 				<table class="w-full text-left text-sm">
-					<thead class="bg-slate-900 text-slate-400">
-						<tr>
-							<th class="px-4 py-3 font-medium">Representative</th>
-							<th class="px-4 py-3 font-medium">Date</th>
-							<th class="px-4 py-3 font-medium">Type</th>
-							<th class="px-4 py-3 font-medium">Amount</th>
+					<thead class="text-[#6a6a6a]">
+						<tr class="border-b border-[#222]">
+							<th class="px-5 py-3 font-medium">Representative</th>
+							<th class="px-5 py-3 font-medium">Date</th>
+							<th class="px-5 py-3 font-medium">Type</th>
+							<th class="px-5 py-3 font-medium">Amount</th>
 						</tr>
 					</thead>
-					<tbody class="divide-y divide-slate-800">
+					<tbody>
 						{#each trades as t (t.representative + t.transaction_date + t.transaction_type)}
-							<tr class="bg-slate-950 hover:bg-slate-900/50">
-								<td class="px-4 py-3">{t.representative}</td>
-								<td class="px-4 py-3 text-slate-400">{fmtDate(t.transaction_date)}</td>
-								<td class="px-4 py-3">
-									<span
-										class="rounded-full px-2 py-0.5 text-xs font-semibold {t.transaction_type ===
-										'BUY'
-											? 'bg-emerald-500/20 text-emerald-300'
-											: 'bg-rose-500/20 text-rose-300'}"
-									>
-										{t.transaction_type}
-									</span>
+							<tr class="border-b border-[#1c1c1c] transition-colors last:border-0 hover:bg-[#181818]">
+								<td class="px-5 py-3 text-white">{t.representative}</td>
+								<td class="tnum px-5 py-3 text-[#9a9a9a]">{fmtDate(t.transaction_date)}</td>
+								<td class="px-5 py-3 font-semibold {t.transaction_type === 'BUY'
+									? 'text-[#00c805]'
+									: 'text-[#ff5000]'}">
+									{t.transaction_type}
 								</td>
-								<td class="px-4 py-3 text-slate-300">{t.amount_range || '—'}</td>
+								<td class="tnum px-5 py-3 text-[#cfcfcf]">{t.amount_range || '—'}</td>
 							</tr>
 						{/each}
 					</tbody>

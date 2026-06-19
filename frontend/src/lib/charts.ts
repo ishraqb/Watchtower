@@ -15,18 +15,28 @@ export interface SymbolChart {
 const chartOptions = {
 	layout: {
 		background: { color: 'transparent' },
-		textColor: '#cbd5e1'
+		textColor: '#7a7a7a',
+		fontFamily: 'Inter, sans-serif',
+		attributionLogo: false
 	},
+	// Gridless, Robinhood-style canvas.
 	grid: {
-		vertLines: { color: 'rgba(148, 163, 184, 0.1)' },
-		horzLines: { color: 'rgba(148, 163, 184, 0.1)' }
+		vertLines: { visible: false },
+		horzLines: { visible: false }
 	},
-	rightPriceScale: { borderColor: 'rgba(148, 163, 184, 0.2)' },
+	rightPriceScale: { visible: false },
+	leftPriceScale: { visible: false },
 	timeScale: {
-		borderColor: 'rgba(148, 163, 184, 0.2)',
+		borderVisible: false,
 		timeVisible: true,
-		secondsVisible: true
+		secondsVisible: false
 	},
+	crosshair: {
+		vertLine: { color: 'rgba(255,255,255,0.2)', labelVisible: false, width: 1 as const },
+		horzLine: { visible: false, labelVisible: false }
+	},
+	handleScale: false,
+	handleScroll: false,
 	autoSize: true
 };
 
@@ -34,10 +44,12 @@ const chartOptions = {
 export function createSymbolChart(container: HTMLElement): SymbolChart {
 	const chart = createChart(container, chartOptions);
 	const series = chart.addSeries(LineSeries, {
-		color: '#38bdf8',
+		color: '#00c805',
 		lineWidth: 2,
-		priceLineVisible: true,
-		lastValueVisible: true
+		priceLineVisible: false,
+		lastValueVisible: false,
+		crosshairMarkerVisible: true,
+		crosshairMarkerRadius: 4
 	});
 	return { chart, series, lastTime: 0 };
 }
@@ -62,15 +74,19 @@ export function pushPrice(sc: SymbolChart, epochMillis: number, price: number): 
  */
 export function setSeriesData(
 	sc: SymbolChart,
-	points: { time: number; value: number }[]
+	points: { time: number; value: number }[],
+	baseline?: number
 ): void {
 	const data = points
 		.filter((p) => Number.isFinite(p.time) && Number.isFinite(p.value))
 		.map((p) => ({ time: p.time as UTCTimestamp, value: p.value }));
 
 	if (data.length > 0) {
-		const up = data[data.length - 1].value >= data[0].value;
-		sc.series.applyOptions({ color: up ? '#34d399' : '#f87171' });
+		// Color against the same baseline as the displayed % (prior close for 1D,
+		// otherwise the first point) so the line and the percentage always agree.
+		const base = baseline && baseline > 0 ? baseline : data[0].value;
+		const up = data[data.length - 1].value >= base;
+		sc.series.applyOptions({ color: up ? '#00c805' : '#ff5000' });
 		sc.lastTime = data[data.length - 1].time as number;
 	}
 

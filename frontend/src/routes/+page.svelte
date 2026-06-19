@@ -12,6 +12,7 @@
 	} from '$lib/ws';
 	import { createSymbolChart, pushPrice, setSeriesData, type SymbolChart } from '$lib/charts';
 	import { getQuote, getHistory, watchSymbol, type Quote } from '$lib/api';
+	import Nav from '$lib/Nav.svelte';
 
 	const DEFAULT_SYMBOLS = ['AAPL', 'TSLA', 'RIVN'];
 	const STORAGE_KEY = 'watchtower:symbols';
@@ -77,16 +78,16 @@
 		try {
 			const hist = await getHistory(sym, range);
 			const pts = hist.points;
+			// 1D is measured against the prior close (Robinhood-style); other
+			// ranges are measured against the first point in the window.
+			const base =
+				range === '1d' && hist.previous_close > 0 ? hist.previous_close : (pts[0]?.value ?? 0);
 			// Guard against a stale poll landing after the user switched ranges.
 			if (charts[sym] && selectedRange[sym] === range) {
-				setSeriesData(charts[sym], pts);
+				setSeriesData(charts[sym], pts, base);
 			}
 			if (pts.length > 0) {
 				const last = pts[pts.length - 1].value;
-				// 1D is measured against the prior close (Robinhood-style); other
-				// ranges are measured against the first point in the window.
-				const base =
-					range === '1d' && hist.previous_close > 0 ? hist.previous_close : pts[0].value;
 				const change = last - base;
 				rangeChange[sym] = { change, pct: base ? (change / base) * 100 : 0 };
 			}
@@ -179,8 +180,8 @@
 	}
 
 	function changeColor(change: number | undefined): string {
-		if (change === undefined || change === 0) return 'text-slate-400';
-		return change > 0 ? 'text-emerald-400' : 'text-rose-400';
+		if (change === undefined || change === 0) return 'text-[#9a9a9a]';
+		return change > 0 ? 'text-[#00c805]' : 'text-[#ff5000]';
 	}
 
 	// Refreshes day-stat quotes for every symbol. Runs on the slower interval
@@ -217,10 +218,10 @@
 	});
 
 	function sentimentColor(score: number | undefined): string {
-		if (score === undefined) return 'text-slate-400';
-		if (score > 0.05) return 'text-emerald-400';
-		if (score < -0.05) return 'text-rose-400';
-		return 'text-amber-400';
+		if (score === undefined) return 'text-[#9a9a9a]';
+		if (score > 0.05) return 'text-[#00c805]';
+		if (score < -0.05) return 'text-[#ff5000]';
+		return 'text-[#e8b923]';
 	}
 
 	function sentimentLabel(score: number | undefined): string {
@@ -263,7 +264,15 @@
 	});
 
 	const statusColor = $derived(
-		status === 'open' ? 'bg-emerald-500' : status === 'connecting' ? 'bg-amber-500' : 'bg-rose-500'
+		status === 'open'
+			? 'bg-[#00c805]'
+			: status === 'connecting'
+				? 'bg-[#e8b923]'
+				: 'bg-[#ff5000]'
+	);
+
+	const statusLabel = $derived(
+		status === 'open' ? 'Live' : status === 'connecting' ? 'Connecting' : 'Offline'
 	);
 </script>
 
@@ -271,112 +280,85 @@
 	<title>Watchtower — Live Market Dashboard</title>
 </svelte:head>
 
-<div class="min-h-screen bg-slate-950 text-slate-100">
-	<header class="border-b border-slate-800 px-6 py-4">
-		<div class="flex items-center justify-between">
-			<div>
-				<h1 class="text-2xl font-bold tracking-tight">Watchtower</h1>
-				<p class="text-sm text-slate-400">Real-time market intelligence</p>
-			</div>
-			<div class="flex items-center gap-3">
-				<nav class="flex gap-4 text-sm">
-					<a class="text-sky-400 hover:text-sky-300" href="/">Live</a>
-					<a class="text-slate-400 hover:text-slate-200" href="/congress">Congress</a>
-					<a class="text-slate-400 hover:text-slate-200" href="/ipo">IPOs</a>
-				</nav>
-				<span class="flex items-center gap-2 rounded-full bg-slate-900 px-3 py-1 text-xs">
-					<span class="h-2 w-2 rounded-full {statusColor}"></span>
-					{status}
-				</span>
-			</div>
-		</div>
-	</header>
+<div class="min-h-screen">
+	<Nav active="live" />
 
-	<main class="grid grid-cols-1 gap-6 p-6 xl:grid-cols-[1fr_22rem]">
+	<main class="mx-auto grid max-w-6xl grid-cols-1 gap-8 px-6 py-8 xl:grid-cols-[1fr_20rem]">
 		<div>
-			<form class="mb-6 flex flex-wrap items-center gap-2" onsubmit={addSymbol}>
-				<input
-					class="w-40 rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm uppercase placeholder:normal-case placeholder:text-slate-500 focus:border-sky-500 focus:outline-none"
-					placeholder="Add ticker (e.g. NVDA)"
-					maxlength="10"
-					bind:value={newSymbol}
-				/>
-				<button
-					type="submit"
-					class="rounded-lg bg-sky-500 px-4 py-2 text-sm font-medium text-white hover:bg-sky-400 disabled:opacity-50"
-					disabled={symbols.length >= MAX_SYMBOLS}
-				>
-					Add
-				</button>
-				{#if addError}
-					<span class="text-sm text-rose-400">{addError}</span>
-				{:else}
-					<span class="text-xs text-slate-500">
-						Tracking {symbols.length}/{MAX_SYMBOLS} · your list is saved in this browser
-					</span>
-				{/if}
-			</form>
+			<div class="mb-8 flex flex-wrap items-end justify-between gap-4">
+				<div>
+					<h1 class="text-3xl font-bold tracking-tight text-white">Watchlist</h1>
+					<p class="mt-1 flex items-center gap-2 text-sm text-[#9a9a9a]">
+						<span class="h-2 w-2 rounded-full {statusColor}"></span>
+						{statusLabel} · real-time market intelligence
+					</p>
+				</div>
+				<form class="flex items-center gap-2" onsubmit={addSymbol}>
+					<input
+						class="w-44 rounded-full border border-[#2a2a2a] bg-[#141414] px-4 py-2 text-sm uppercase text-white placeholder:normal-case placeholder:text-[#6a6a6a] focus:border-[#00c805] focus:outline-none"
+						placeholder="Add symbol"
+						maxlength="10"
+						bind:value={newSymbol}
+					/>
+					<button
+						type="submit"
+						class="rounded-full bg-[#00c805] px-5 py-2 text-sm font-semibold text-black transition-opacity hover:opacity-90 disabled:opacity-40"
+						disabled={symbols.length >= MAX_SYMBOLS}
+					>
+						Add
+					</button>
+				</form>
+			</div>
 
-			<div class="grid grid-cols-1 gap-6 lg:grid-cols-3">
+			{#if addError}
+				<p class="mb-4 text-sm text-[#ff5000]">{addError}</p>
+			{/if}
+
+			<div class="grid grid-cols-1 gap-5 lg:grid-cols-2">
 				{#each symbols as sym (sym)}
-					<section class="rounded-xl border border-slate-800 bg-slate-900/50 p-4">
-						<div class="mb-2 flex items-baseline justify-between">
-							<div class="flex items-center gap-2">
-								<h2 class="text-lg font-semibold">{sym}</h2>
-								<button
-									class="text-slate-600 hover:text-rose-400"
-									title="Remove {sym}"
-									aria-label="Remove {sym}"
-									onclick={() => removeSymbol(sym)}
-								>
-									✕
-								</button>
+					<section
+						class="group rounded-2xl bg-[#141414] p-5 transition-colors hover:bg-[#181818]"
+					>
+						<div class="mb-3 flex items-start justify-between">
+							<div>
+								<div class="flex items-center gap-2">
+									<h2 class="text-xl font-bold text-white">{sym}</h2>
+									<button
+										class="text-[#3a3a3a] opacity-0 transition group-hover:opacity-100 hover:text-[#ff5000]"
+										title="Remove {sym}"
+										aria-label="Remove {sym}"
+										onclick={() => removeSymbol(sym)}
+									>
+										✕
+									</button>
+								</div>
+								{#if rangeChange[sym]}
+									<div class="tnum mt-0.5 text-sm font-semibold {changeColor(rangeChange[sym].pct)}">
+										{rangeChange[sym].pct >= 0 ? '▲' : '▼'}
+										{Math.abs(rangeChange[sym].pct).toFixed(2)}%
+										<span class="font-normal text-[#6a6a6a]">{rangeLabel(sym)}</span>
+									</div>
+								{/if}
 							</div>
 							<div class="text-right">
-								<span class="font-mono text-xl text-sky-400">
-									{displayPrice(sym) !== undefined
-										? `$${displayPrice(sym)!.toFixed(2)}`
-										: '—'}
-								</span>
-								{#if rangeChange[sym]}
-									<span class="ml-1 font-mono text-xs {changeColor(rangeChange[sym].pct)}">
-										{rangeChange[sym].pct >= 0 ? '+' : ''}{rangeChange[sym].pct.toFixed(2)}%
-										<span class="text-slate-500">{rangeLabel(sym)}</span>
-									</span>
+								<div class="tnum text-2xl font-bold text-white">
+									{displayPrice(sym) !== undefined ? `$${displayPrice(sym)!.toFixed(2)}` : '—'}
+								</div>
+								{#if !latestPrices[sym] && quotes[sym]}
+									<div class="text-[10px] uppercase tracking-wide text-[#6a6a6a]">at last close</div>
 								{/if}
 							</div>
 						</div>
 
-						{#if quotes[sym]}
-							<div class="mb-3 grid grid-cols-4 gap-1 text-center text-[11px] text-slate-400">
-								<div>
-									<div class="text-slate-500">Open</div>
-									<div class="font-mono text-slate-200">{quotes[sym].open.toFixed(2)}</div>
-								</div>
-								<div>
-									<div class="text-slate-500">High</div>
-									<div class="font-mono text-slate-200">{quotes[sym].high.toFixed(2)}</div>
-								</div>
-								<div>
-									<div class="text-slate-500">Low</div>
-									<div class="font-mono text-slate-200">{quotes[sym].low.toFixed(2)}</div>
-								</div>
-								<div>
-									<div class="text-slate-500">Prev</div>
-									<div class="font-mono text-slate-200">{quotes[sym].previous_close.toFixed(2)}</div>
-								</div>
-							</div>
-						{/if}
+						<div use:chartLifecycle={sym} class="h-56 w-full"></div>
 
-						<div use:chartLifecycle={sym} class="h-64 w-full"></div>
-
-						<div class="mt-2 flex flex-wrap justify-center gap-1">
+						<div class="mt-3 flex items-center justify-between border-t border-[#222] pt-3">
 							{#each RANGES as r (r.key)}
 								<button
-									class="rounded px-2 py-1 text-xs font-medium transition-colors
+									class="tnum rounded px-2 py-1 text-xs font-semibold transition-colors
 										{selectedRange[sym] === r.key
-										? 'bg-sky-500 text-white'
-										: 'bg-slate-800 text-slate-400 hover:bg-slate-700 hover:text-slate-200'}"
+										? 'text-[#00c805]'
+										: 'text-[#6a6a6a] hover:text-white'}"
 									onclick={() => loadRange(sym, r.key)}
 								>
 									{r.label}
@@ -384,53 +366,67 @@
 							{/each}
 						</div>
 
-						{#if !latestPrices[sym] && quotes[sym]}
-							<p class="mt-2 text-center text-[11px] text-slate-500">
-								Last known price · not currently streaming
-							</p>
+						{#if quotes[sym]}
+							<div class="tnum mt-3 grid grid-cols-4 gap-2 text-center text-[11px]">
+								<div>
+									<div class="text-[#6a6a6a]">Open</div>
+									<div class="text-[#cfcfcf]">{quotes[sym].open.toFixed(2)}</div>
+								</div>
+								<div>
+									<div class="text-[#6a6a6a]">High</div>
+									<div class="text-[#cfcfcf]">{quotes[sym].high.toFixed(2)}</div>
+								</div>
+								<div>
+									<div class="text-[#6a6a6a]">Low</div>
+									<div class="text-[#cfcfcf]">{quotes[sym].low.toFixed(2)}</div>
+								</div>
+								<div>
+									<div class="text-[#6a6a6a]">Prev</div>
+									<div class="text-[#cfcfcf]">{quotes[sym].previous_close.toFixed(2)}</div>
+								</div>
+							</div>
 						{/if}
 					</section>
 				{/each}
 			</div>
 
 			{#if !hasLiveTicks}
-				<p class="mt-6 text-center text-sm text-slate-500">
-					No live ticks right now — showing each symbol's last-known price and day stats from the
-					most recent session. Live charts resume automatically during US trading hours
-					(9:30 AM–4:00 PM ET).
+				<p class="mt-6 text-center text-xs text-[#6a6a6a]">
+					Markets are quiet right now — showing each symbol's last-known price and day stats.
+					Live charts resume automatically during US trading hours (9:30 AM–4:00 PM ET).
 				</p>
 			{/if}
 		</div>
 
-		<aside class="rounded-xl border border-slate-800 bg-slate-900/50 p-4">
-			<h2 class="mb-3 flex items-center gap-2 text-lg font-semibold">
+		<aside class="h-fit rounded-2xl bg-[#141414] p-5 xl:sticky xl:top-24">
+			<h2 class="mb-4 flex items-center gap-2 text-sm font-semibold uppercase tracking-wide text-[#9a9a9a]">
 				Anomaly Feed
-				<span class="rounded-full bg-slate-800 px-2 py-0.5 text-xs text-slate-400">
+				<span class="rounded-full bg-[#222] px-2 py-0.5 text-xs text-[#9a9a9a]">
 					{anomalyList.length}
 				</span>
 			</h2>
 
 			{#if anomalyList.length === 0}
-				<p class="text-sm text-slate-500">
-					No volume spikes detected yet. When a symbol's volume exceeds 3x its recent average, it
+				<p class="text-sm leading-relaxed text-[#6a6a6a]">
+					No volume spikes detected yet. When a symbol's volume exceeds 3× its recent average, it
 					appears here and is automatically analyzed for news sentiment.
 				</p>
 			{:else}
 				<ul class="space-y-3">
 					{#each anomalyList as a (a.event_id)}
-						<li class="rounded-lg border border-slate-800 bg-slate-950 p-3">
+						<li class="rounded-xl bg-[#0d0d0d] p-3">
 							<div class="flex items-center justify-between">
-								<span class="font-semibold text-sky-400">{a.symbol}</span>
-								<span class="text-xs text-slate-500">{fmtTime(a.time)}</span>
+								<span class="font-bold text-white">{a.symbol}</span>
+								<span class="text-xs text-[#6a6a6a]">{fmtTime(a.time)}</span>
 							</div>
-							<p class="mt-1 text-xs text-slate-400">
+							<p class="tnum mt-1 text-xs text-[#9a9a9a]">
 								Volume {a.trigger_volume.toLocaleString()} vs avg {Math.round(
 									a.avg_volume
 								).toLocaleString()}
 							</p>
-							<div class="mt-2 border-t border-slate-800 pt-2">
+							<div class="mt-2 border-t border-[#222] pt-2">
 								<div class="flex items-center justify-between text-sm">
-									<span class="text-slate-400">Sentiment</span>
+									<span class="text-[#9a9a9a]">Sentiment</span>
 									<span class="font-semibold {sentimentColor(a.sentiment_score)}">
 										{sentimentLabel(a.sentiment_score)}
 										{#if a.sentiment_score !== undefined}
@@ -439,10 +435,10 @@
 									</span>
 								</div>
 								{#if a.top_headline}
-									<p class="mt-1 text-xs text-slate-400">
+									<p class="mt-1 text-xs text-[#9a9a9a]">
 										“{a.top_headline}”
 									</p>
-									<p class="mt-1 text-xs text-slate-600">{a.article_count} articles analyzed</p>
+									<p class="mt-1 text-xs text-[#5a5a5a]">{a.article_count} articles analyzed</p>
 								{/if}
 							</div>
 						</li>
