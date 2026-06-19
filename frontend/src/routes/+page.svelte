@@ -11,13 +11,16 @@
 		type Anomaly
 	} from '$lib/ws';
 	import { createSymbolChart, pushPrice, setSeriesData, type SymbolChart } from '$lib/charts';
-	import { getQuote, getHistory, type Quote } from '$lib/api';
+	import { getQuote, getHistory, watchSymbol, type Quote } from '$lib/api';
 
 	const DEFAULT_SYMBOLS = ['AAPL', 'TSLA', 'RIVN'];
 	const STORAGE_KEY = 'watchtower:symbols';
-	const MAX_SYMBOLS = 12;
-	// How often to auto-refresh quotes/charts so non-streaming symbols stay live.
-	const POLL_INTERVAL_MS = 20_000;
+	const MAX_SYMBOLS = 25;
+	// Charts poll Yahoo (unmetered); quotes poll Finnhub, which is rate-limited,
+	// so they refresh more slowly to stay under the free-tier 60 calls/min even
+	// at 25 symbols. Live prices come from the WebSocket regardless.
+	const CHART_POLL_MS = 30_000;
+	const QUOTE_POLL_MS = 60_000;
 
 	// Robinhood-style ranges. `key` matches the backend allow-list.
 	const RANGES = [
@@ -47,7 +50,8 @@
 	// Net change over the currently-selected range, keyed by symbol.
 	let rangeChange = $state<Record<string, { change: number; pct: number }>>({});
 
-	let pollTimer: ReturnType<typeof setInterval> | null = null;
+	let chartTimer: ReturnType<typeof setInterval> | null = null;
+	let quoteTimer: ReturnType<typeof setInterval> | null = null;
 
 	function persistSymbols() {
 		if (typeof window === 'undefined') return;
@@ -105,6 +109,8 @@
 			.then((q) => (quotes[sym] = q))
 			.catch(() => {});
 		fetchAndRender(sym, selectedRange[sym], true);
+		// Ask the backend to stream this symbol live (idempotent server-side).
+		watchSymbol(sym).catch(() => {});
 	}
 
 	// Svelte action: owns the chart lifecycle for a single symbol card.
@@ -177,14 +183,20 @@
 		return change > 0 ? 'text-emerald-400' : 'text-rose-400';
 	}
 
-	// Periodic refresh so every symbol (including non-streaming, user-added ones)
-	// updates automatically. Symbols actively streaming live ticks on an intraday
-	// view are left to the WebSocket to avoid fighting the real-time series.
-	function refreshAll() {
+	// Refreshes day-stat quotes for every symbol. Runs on the slower interval
+	// because quotes hit the rate-limited Finnhub REST API.
+	function refreshQuotes() {
 		for (const sym of symbols) {
 			getQuote(sym)
 				.then((q) => (quotes[sym] = q))
 				.catch(() => {});
+		}
+	}
+
+	// Refreshes charts for symbols that aren't already streaming live intraday
+	// ticks over the WebSocket (those are kept real-time by the socket instead).
+	function refreshCharts() {
+		for (const sym of symbols) {
 			const streamingIntraday = status === 'open' && !!latestPrices[sym] && isIntraday(sym);
 			if (!streamingIntraday) {
 				fetchAndRender(sym, selectedRange[sym] ?? '1d', false);
@@ -236,7 +248,8 @@
 			// Fall back to defaults on any parse/storage error.
 		}
 		connect();
-		pollTimer = setInterval(refreshAll, POLL_INTERVAL_MS);
+		chartTimer = setInterval(refreshCharts, CHART_POLL_MS);
+		quoteTimer = setInterval(refreshQuotes, QUOTE_POLL_MS);
 	});
 
 	onDestroy(() => {
@@ -244,7 +257,8 @@
 		unsubPrices();
 		unsubTick();
 		unsubAnomalies();
-		if (pollTimer) clearInterval(pollTimer);
+		if (chartTimer) clearInterval(chartTimer);
+		if (quoteTimer) clearInterval(quoteTimer);
 		disconnect();
 	});
 

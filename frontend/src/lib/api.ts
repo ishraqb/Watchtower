@@ -43,3 +43,9 @@ export function getHistory(symbol: string, range: string): Promise<History> {
 		`/api/history/${encodeURIComponent(symbol)}?range=${encodeURIComponent(range)}`
 	);
 }
+
+// Subscribes a symbol to the backend's live Finnhub WebSocket stream so it
+// receives real-time ticks. Idempotent on the server.
+export async function watchSymbol(symbol: string): Promise<void> {
+	await fetch(`${API_BASE}/api/watch/${encodeURIComponent(symbol)}`, { method: 'POST' });
+}
