@@ -1,34 +1,19 @@
-// Sentiment worker: reads volume anomalies off Kafka, pulls the company news
-// for that ticker, scores the headlines, and publishes the result back so the
-// backend can show it on the live feed. Kept as a separate service so the
+// Sentiment worker: reads volume anomalies off the broker, pulls the company
+// news for that ticker, scores the headlines, and publishes the result back so
+// the backend can show it on the live feed. Kept as a separate service so the
 // scoring work never blocks the main tick ingestion path.
-import { Kafka, type Consumer, type Producer } from 'kafkajs';
+//
+// The broker is pluggable (Kafka locally, Redis Streams on free hosting) and
+// there's a tiny HTTP server so the free-tier host can health-check and wake it.
+import http from 'node:http';
 import Sentiment from 'sentiment';
-import { config, TOPIC_ANOMALIES, TOPIC_SENTIMENT } from './config.js';
+import { config } from './config.js';
+import { createBroker, type AnomalyMessage, type Broker, type SentimentMessage } from './broker/index.js';
 import { fetchCompanyNews } from './finnhub.js';
 import { insertSentiment, closePool } from './db.js';
 
-interface AnomalyMessage {
-	event_id: number;
-	symbol: string;
-	time: string;
-	trigger_volume: number;
-	avg_volume: number;
-}
-
-interface SentimentMessage {
-	event_id: number;
-	symbol: string;
-	sentiment_score: number;
-	article_count: number;
-	top_headline: string;
-}
-
 const sentiment = new Sentiment();
-
-const kafka = new Kafka({ clientId: 'sentiment-worker', brokers: config.kafkaBrokers });
-const consumer: Consumer = kafka.consumer({ groupId: 'sentiment-worker-group' });
-const producer: Producer = kafka.producer();
+const broker: Broker = createBroker();
 
 /**
  * Scores all headlines for an anomaly's symbol and republishes the result.
@@ -72,43 +57,44 @@ async function processAnomaly(msg: AnomalyMessage): Promise<void> {
 		article_count: count,
 		top_headline: topHeadline
 	};
-
-	await producer.send({
-		topic: TOPIC_SENTIMENT,
-		messages: [{ key: msg.symbol, value: JSON.stringify(result) }]
-	});
+	await broker.publishSentiment(result);
 
 	console.log(
 		`sentiment: ${msg.symbol} event ${msg.event_id} -> score ${clamped.toFixed(3)} over ${count} articles`
 	);
 }
 
-async function main(): Promise<void> {
-	await producer.connect();
-	await consumer.connect();
-	await consumer.subscribe({ topic: TOPIC_ANOMALIES, fromBeginning: false });
-
-	console.log('sentiment-worker: consuming', TOPIC_ANOMALIES);
-
-	await consumer.run({
-		eachMessage: async ({ message }) => {
-			if (!message.value) return;
-			try {
-				const anomaly = JSON.parse(message.value.toString()) as AnomalyMessage;
-				await processAnomaly(anomaly);
-			} catch (err) {
-				// Log the failure without leaking payloads that could contain secrets.
-				console.error('sentiment-worker: failed to process message:', (err as Error).message);
-			}
+/**
+ * Tiny HTTP server. On the free tier a service needs to listen on a port, and
+ * the backend pings /wake to spin us back up when an anomaly fires. The actual
+ * processing is the broker loop that's already running - /wake just gets us out
+ * of a spun-down state so that loop can drain the stream.
+ */
+function startHealthServer(): void {
+	const server = http.createServer((req, res) => {
+		if (req.url === '/health' || req.url === '/wake') {
+			res.writeHead(200, { 'Content-Type': 'application/json' });
+			res.end(JSON.stringify({ status: 'ok' }));
+			return;
 		}
+		res.writeHead(404);
+		res.end();
 	});
+	server.listen(config.port, () => {
+		console.log(`sentiment-worker: health server listening on :${config.port}`);
+	});
+}
+
+async function main(): Promise<void> {
+	startHealthServer();
+	await broker.start(processAnomaly);
+	console.log(`sentiment-worker: started (broker=${config.broker})`);
 }
 
 async function shutdown(): Promise<void> {
 	console.log('sentiment-worker: shutting down');
 	try {
-		await consumer.disconnect();
-		await producer.disconnect();
+		await broker.shutdown();
 		await closePool();
 	} finally {
 		process.exit(0);

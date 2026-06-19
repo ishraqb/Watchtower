@@ -1,7 +1,7 @@
 {
   "name": "watchtower-sentiment-worker",
   "version": "1.0.0",
-  "description": "Kafka consumer that scores news sentiment for market anomalies",
+  "description": "Worker that scores news sentiment for market anomalies (Kafka or Redis Streams)",
   "type": "module",
   "main": "dist/index.js",
   "scripts": {
@@ -11,6 +11,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "ioredis": "^5.11.1",
     "kafkajs": "^2.2.4",
     "node-fetch": "^3.3.2",
     "pg": "^8.13.1",

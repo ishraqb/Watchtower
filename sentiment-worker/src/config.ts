@@ -17,10 +17,12 @@ function required(name: string): string {
 }
 
 export const config = {
+	// "kafka" (local/dev) or "redis" (Redis Streams, used on free hosting).
+	broker: process.env.BROKER ?? 'kafka',
 	kafkaBrokers: (process.env.KAFKA_BROKERS ?? 'localhost:9092').split(','),
+	redisUrl: process.env.REDIS_URL ?? 'redis://localhost:6379',
 	databaseUrl: required('DATABASE_URL'),
-	finnhubApiKey: required('FINNHUB_API_KEY')
+	finnhubApiKey: required('FINNHUB_API_KEY'),
+	// Port for the little health/wake HTTP server (Render needs a listening port).
+	port: Number(process.env.PORT ?? 3001)
 };
-
-export const TOPIC_ANOMALIES = 'market-anomalies';
-export const TOPIC_SENTIMENT = 'sentiment-results';
