@@ -41,7 +41,8 @@ services:
     networks:
       - watchtower_net
     healthcheck:
-      test: ["CMD-SHELL", "echo ruok | nc localhost 2181 | grep imok"]
+      # The image ships no netcat, so check the client port via bash /dev/tcp.
+      test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/localhost/2181'"]
       interval: 10s
       timeout: 5s
       retries: 5
