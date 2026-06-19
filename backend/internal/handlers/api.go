@@ -87,13 +87,14 @@ func (a *API) GetCongressBySymbol(c *gin.Context) {
 
 // IPOEvaluation is the JSON shape returned for a scored IPO listing.
 type IPOEvaluation struct {
-	Symbol       string     `json:"symbol"`
-	CompanyName  string     `json:"company_name"`
-	ExpectedDate *time.Time `json:"expected_date"`
-	RiskScore    int        `json:"risk_score"`
-	Exchange     string     `json:"exchange"`
-	PriceRange   string     `json:"price_range"`
-	SharesValue  int64      `json:"shares_value"`
+	Symbol       string               `json:"symbol"`
+	CompanyName  string               `json:"company_name"`
+	ExpectedDate *time.Time           `json:"expected_date"`
+	RiskScore    int                  `json:"risk_score"`
+	Exchange     string               `json:"exchange"`
+	PriceRange   string               `json:"price_range"`
+	SharesValue  int64                `json:"shares_value"`
+	Factors      []finnhub.RiskFactor `json:"factors"`
 }
 
 // GetIPOs handles GET /api/ipo.
@@ -133,6 +134,9 @@ func (a *API) GetIPOs(c *gin.Context) {
 		if sharesValue != nil {
 			e.SharesValue = *sharesValue
 		}
+		// Recompute the factor breakdown from stored inputs so the UI can
+		// explain why each listing earned its score.
+		_, e.Factors = finnhub.ScoreWithFactors(e.PriceRange, float64(e.SharesValue))
 		ipos = append(ipos, e)
 	}
 

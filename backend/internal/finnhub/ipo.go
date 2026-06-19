@@ -169,25 +169,48 @@ func (p *IPOPoller) upsert(ctx context.Context, data ipoResponse) (int, error) {
 	return queued, nil
 }
 
-// computeRiskScore returns a 0-100 risk rating (higher = riskier) from the
-// offering size and the width of the proposed price range. Larger raises and
-// tighter price ranges signal more institutional confidence and lower risk.
+// RiskFactor is a single contributor to an IPO's risk score, with the signed
+// number of points it added and a human-readable explanation.
+type RiskFactor struct {
+	Label  string `json:"label"`
+	Impact int    `json:"impact"`
+	Detail string `json:"detail"`
+}
+
+// computeRiskScore returns just the 0-100 risk rating.
 func computeRiskScore(priceRange string, totalValue float64) int {
+	score, _ := ScoreWithFactors(priceRange, totalValue)
+	return score
+}
+
+// ScoreWithFactors returns a 0-100 risk rating (higher = riskier) along with
+// the breakdown of factors that produced it. Larger raises and tighter price
+// ranges signal more institutional confidence and lower risk; small, cheap, or
+// widely-ranged offerings score riskier.
+func ScoreWithFactors(priceRange string, totalValue float64) (int, []RiskFactor) {
 	score := 50
+	factors := []RiskFactor{
+		{Label: "Base score", Impact: 50, Detail: "Every listing starts at a neutral 50 / 100."},
+	}
+
+	addFactor := func(label string, impact int, detail string) {
+		score += impact
+		factors = append(factors, RiskFactor{Label: label, Impact: impact, Detail: detail})
+	}
 
 	switch {
 	case totalValue >= 1_000_000_000:
-		score -= 25
+		addFactor("Offering size", -25, "Raises over $1B signal strong institutional demand and underwriting confidence.")
 	case totalValue >= 500_000_000:
-		score -= 15
+		addFactor("Offering size", -15, "A $500M+ raise indicates solid institutional backing.")
 	case totalValue >= 100_000_000:
-		score -= 5
+		addFactor("Offering size", -5, "A $100M+ raise is a moderately sized, established offering.")
 	case totalValue > 0 && totalValue < 50_000_000:
-		score += 20
+		addFactor("Offering size", 20, "Micro-cap raises under $50M are thinly capitalized and far more volatile.")
 	case totalValue > 0 && totalValue < 100_000_000:
-		score += 10
+		addFactor("Offering size", 10, "Small raises under $100M carry elevated post-listing volatility.")
 	default:
-		score += 15 // unknown size is treated as uncertain
+		addFactor("Offering size", 15, "Offering size is unknown, which adds uncertainty.")
 	}
 
 	low, high, ok := parsePriceRange(priceRange)
@@ -195,18 +218,18 @@ func computeRiskScore(priceRange string, totalValue float64) int {
 		width := (high - low) / low
 		switch {
 		case width >= 0.15:
-			score += 15
+			addFactor("Price-range width", 15, "A wide (15%+) price range suggests underwriters are unsure of fair value.")
 		case width >= 0.08:
-			score += 8
+			addFactor("Price-range width", 8, "A moderately wide price range signals some pricing uncertainty.")
 		}
 		switch {
 		case low < 5:
-			score += 20
+			addFactor("Share price", 20, "Sub-$5 pricing flags penny-stock-like risk and low liquidity.")
 		case low < 10:
-			score += 10
+			addFactor("Share price", 10, "A single-digit share price is associated with higher volatility.")
 		}
 	} else {
-		score += 5 // no usable price guidance
+		addFactor("Price guidance", 5, "No usable price range was provided, which adds uncertainty.")
 	}
 
 	if score < 0 {
@@ -215,7 +238,7 @@ func computeRiskScore(priceRange string, totalValue float64) int {
 	if score > 100 {
 		score = 100
 	}
-	return score
+	return score, factors
 }
 
 // parsePriceRange handles both "16.00" and "28.00-32.00" forms.
