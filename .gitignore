@@ -1,0 +1,28 @@
+# Secrets
+.env
+
+# Go
+backend/server
+backend/*.exe
+*.test
+*.out
+
+# Node / TypeScript
+node_modules/
+sentiment-worker/dist/
+*.log
+npm-debug.log*
+
+# SvelteKit / frontend
+frontend/.svelte-kit/
+frontend/build/
+frontend/.vercel/
+frontend/node_modules/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.idea/
+*.swp
