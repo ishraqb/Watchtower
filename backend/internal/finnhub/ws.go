@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"regexp"
+	"sync"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -14,6 +16,13 @@ import (
 
 // DefaultSymbols are the tickers Watchtower subscribes to on the free tier.
 var DefaultSymbols = []string{"AAPL", "TSLA", "RIVN"}
+
+// maxSymbols caps total WS subscriptions to stay within the Finnhub free-tier
+// limit (50 symbols per connection).
+const maxSymbols = 50
+
+// wsSymbol validates a ticker before it is sent in a subscribe frame.
+var wsSymbol = regexp.MustCompile(`^[A-Z.]{1,10}$`)
 
 const wsURL = "wss://ws.finnhub.io"
 
@@ -33,20 +42,62 @@ type subscribeMessage struct {
 	Symbol string `json:"symbol"`
 }
 
-// Client streams live trades from Finnhub onto an outbound channel.
+// Client streams live trades from Finnhub onto an outbound channel. The set of
+// subscribed symbols can be extended at runtime via Subscribe.
 type Client struct {
-	apiKey  string
-	symbols []string
-	Ticks   chan db.Tick
+	apiKey string
+	Ticks  chan db.Tick
+
+	mu         sync.Mutex // guards symbols, subscribed, and writes to conn
+	symbols    []string
+	subscribed map[string]bool
+	conn       *websocket.Conn // nil while disconnected
 }
 
 // NewClient builds a Finnhub WS client. The Ticks channel fans ticks out to consumers.
 func NewClient(apiKey string, symbols []string) *Client {
-	return &Client{
-		apiKey:  apiKey,
-		symbols: symbols,
-		Ticks:   make(chan db.Tick, 1024),
+	c := &Client{
+		apiKey:     apiKey,
+		Ticks:      make(chan db.Tick, 1024),
+		subscribed: make(map[string]bool),
 	}
+	for _, s := range symbols {
+		if wsSymbol.MatchString(s) && !c.subscribed[s] {
+			c.subscribed[s] = true
+			c.symbols = append(c.symbols, s)
+		}
+	}
+	return c
+}
+
+// Subscribe adds a symbol to the live stream at runtime. It is safe to call
+// concurrently and is idempotent. If the socket is currently connected, the
+// subscribe frame is sent immediately; otherwise it is applied on next connect.
+func (c *Client) Subscribe(symbol string) error {
+	if !wsSymbol.MatchString(symbol) {
+		return fmt.Errorf("invalid symbol")
+	}
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if c.subscribed[symbol] {
+		return nil // already streaming
+	}
+	if len(c.symbols) >= maxSymbols {
+		return fmt.Errorf("subscription limit reached")
+	}
+
+	c.subscribed[symbol] = true
+	c.symbols = append(c.symbols, symbol)
+
+	if c.conn != nil {
+		if err := c.conn.WriteJSON(subscribeMessage{Type: "subscribe", Symbol: symbol}); err != nil {
+			return fmt.Errorf("subscribe %s: %w", symbol, err)
+		}
+	}
+	log.Printf("finnhub: subscribed to %s (%d symbols)", symbol, len(c.symbols))
+	return nil
 }
 
 // Run connects, subscribes, and pumps trades until the context is cancelled.
@@ -79,12 +130,27 @@ func (c *Client) connectAndStream(ctx context.Context) error {
 	}
 	defer conn.Close()
 
-	for _, sym := range c.symbols {
+	// Publish the live conn and (re)subscribe to all known symbols under the
+	// lock so a concurrent Subscribe can't race the initial subscribe burst.
+	c.mu.Lock()
+	c.conn = conn
+	current := append([]string(nil), c.symbols...)
+	for _, sym := range current {
 		if err := conn.WriteJSON(subscribeMessage{Type: "subscribe", Symbol: sym}); err != nil {
+			c.conn = nil
+			c.mu.Unlock()
 			return fmt.Errorf("subscribe %s: %w", sym, err)
 		}
 	}
-	log.Printf("finnhub: connected and subscribed to %v", c.symbols)
+	c.mu.Unlock()
+	log.Printf("finnhub: connected and subscribed to %v", current)
+
+	// Clear the live conn on exit so Subscribe stops writing to a dead socket.
+	defer func() {
+		c.mu.Lock()
+		c.conn = nil
+		c.mu.Unlock()
+	}()
 
 	// Close the connection when the context is cancelled to unblock ReadMessage.
 	go func() {

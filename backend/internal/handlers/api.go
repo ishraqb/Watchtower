@@ -19,16 +19,22 @@ type rateLimiter interface {
 	Allow(ctx context.Context, key string) (bool, error)
 }
 
+// symbolSubscriber lets the API add tickers to the live stream at runtime.
+type symbolSubscriber interface {
+	Subscribe(symbol string) error
+}
+
 // API holds dependencies for the REST endpoints.
 type API struct {
 	db         *db.DB
 	finnhubKey string
 	limiter    rateLimiter
+	subscriber symbolSubscriber
 }
 
 // NewAPI builds the REST API handler set.
-func NewAPI(database *db.DB, finnhubKey string, limiter rateLimiter) *API {
-	return &API{db: database, finnhubKey: finnhubKey, limiter: limiter}
+func NewAPI(database *db.DB, finnhubKey string, limiter rateLimiter, subscriber symbolSubscriber) *API {
+	return &API{db: database, finnhubKey: finnhubKey, limiter: limiter, subscriber: subscriber}
 }
 
 // symbolParam validates a user-supplied ticker before it touches a query.
@@ -189,4 +195,26 @@ func (a *API) GetHistory(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, hist)
+}
+
+// Watch handles POST /api/watch/:symbol, adding a ticker to the live Finnhub
+// WebSocket stream so it receives real-time ticks. The symbol is validated
+// before use. Intentionally unauthenticated to match the rest of this demo;
+// it only subscribes to public market data and cannot read or mutate user data.
+func (a *API) Watch(c *gin.Context) {
+	symbol := strings.ToUpper(c.Param("symbol"))
+	if !symbolParam.MatchString(symbol) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid symbol"})
+		return
+	}
+	if a.subscriber == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "live stream unavailable"})
+		return
+	}
+	if err := a.subscriber.Subscribe(symbol); err != nil {
+		// Generic client message; the detailed reason stays server-side.
+		c.JSON(http.StatusConflict, gin.H{"error": "could not subscribe to symbol"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"symbol": symbol, "subscribed": true})
 }
