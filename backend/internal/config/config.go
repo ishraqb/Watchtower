@@ -45,7 +45,8 @@ func Load() *Config {
 		DatabaseURL:   os.Getenv("DATABASE_URL"),
 		RedisURL:      os.Getenv("REDIS_URL"),
 		KafkaBrokers:  os.Getenv("KAFKA_BROKERS"),
-		ServerPort:    getOrDefault("SERVER_PORT", "8080"),
+		// Hosts like Render inject PORT; fall back to SERVER_PORT, then 8080 locally.
+		ServerPort:    getOrDefault("PORT", getOrDefault("SERVER_PORT", "8080")),
 		Broker:        getOrDefault("BROKER", "kafka"),
 		WorkerWakeURL: os.Getenv("WORKER_WAKE_URL"),
 

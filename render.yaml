@@ -1,0 +1,48 @@
+# Render blueprint for the hosted (free) build: the Go backend and the TS
+# sentiment worker. The frontend is a static site and lives on Cloudflare Pages
+# / Netlify instead (keeps it off Render's free instance-hour budget).
+#
+# Postgres (Neon) and Redis (Upstash) are external; their URLs are set as
+# secrets below (sync: false = fill them in via the Render dashboard).
+services:
+  - type: web
+    name: watchtower-backend
+    runtime: docker
+    plan: free
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: ./backend
+    healthCheckPath: /healthz
+    envVars:
+      - key: BROKER
+        value: redis
+      - key: GIN_MODE
+        value: release
+      - key: FINNHUB_API_KEY
+        sync: false
+      - key: DATABASE_URL
+        sync: false
+      - key: REDIS_URL
+        sync: false
+      # Your deployed frontend origin, e.g. https://watchtower.pages.dev
+      - key: ALLOWED_ORIGINS
+        sync: false
+      # The worker's URL + /wake, e.g. https://watchtower-worker.onrender.com/wake
+      - key: WORKER_WAKE_URL
+        sync: false
+
+  - type: web
+    name: watchtower-worker
+    runtime: docker
+    plan: free
+    dockerfilePath: ./sentiment-worker/Dockerfile
+    dockerContext: ./sentiment-worker
+    healthCheckPath: /health
+    envVars:
+      - key: BROKER
+        value: redis
+      - key: FINNHUB_API_KEY
+        sync: false
+      - key: DATABASE_URL
+        sync: false
+      - key: REDIS_URL
+        sync: false
