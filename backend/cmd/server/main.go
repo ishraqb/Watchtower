@@ -6,6 +6,8 @@ import (
 	"log"
 	"net/http"
 	"os/signal"
+	"regexp"
+	"strings"
 	"syscall"
 	"time"
 
@@ -20,6 +22,9 @@ import (
 	"github.com/ishraqb/Watchtower/backend/internal/kafka"
 	rediscache "github.com/ishraqb/Watchtower/backend/internal/redis"
 )
+
+// devSymbol validates the symbol path param on the dev simulate endpoint.
+var devSymbol = regexp.MustCompile(`^[A-Z.]{1,10}$`)
 
 // wsTickPayload is the JSON shape broadcast to browser clients.
 type wsTickPayload struct {
@@ -122,6 +127,23 @@ func main() {
 	router.GET("/ws", hub.HandleWS)
 	router.GET("/api/congress/:symbol", api.GetCongressBySymbol)
 	router.GET("/api/ipo", api.GetIPOs)
+
+	// Dev-only: simulate a volume spike to exercise the full pipeline off-hours.
+	// Guarded by an env flag so it is never reachable in production.
+	if cfg.EnableDevEndpoints {
+		router.POST("/api/dev/simulate-anomaly/:symbol", func(c *gin.Context) {
+			symbol := strings.ToUpper(c.Param("symbol"))
+			if !devSymbol.MatchString(symbol) {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "invalid symbol"})
+				return
+			}
+			synthetic := db.Tick{Time: time.Now(), Symbol: symbol, Price: 0, Volume: 100000}
+			det := anomaly.Detection{Symbol: symbol, TriggerVolume: 100000, AvgVolume: 1000}
+			handleAnomaly(database, producer, hub, synthetic, det)
+			c.JSON(http.StatusAccepted, gin.H{"status": "anomaly simulated", "symbol": symbol})
+		})
+		log.Println("startup: dev endpoints ENABLED (POST /api/dev/simulate-anomaly/:symbol)")
+	}
 
 	srv := &http.Server{
 		Addr:    ":" + cfg.ServerPort,

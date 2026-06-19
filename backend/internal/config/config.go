@@ -14,6 +14,9 @@ type Config struct {
 	RedisURL      string
 	KafkaBrokers  string
 	ServerPort    string
+	// EnableDevEndpoints exposes local-only debug routes (e.g. anomaly simulation).
+	// Must stay false in production so debug operations are never publicly reachable.
+	EnableDevEndpoints bool
 }
 
 // Load reads configuration from a .env file (if present) and the environment.
@@ -30,6 +33,8 @@ func Load() *Config {
 		RedisURL:      os.Getenv("REDIS_URL"),
 		KafkaBrokers:  os.Getenv("KAFKA_BROKERS"),
 		ServerPort:    getOrDefault("SERVER_PORT", "8080"),
+
+		EnableDevEndpoints: os.Getenv("ENABLE_DEV_ENDPOINTS") == "true",
 	}
 
 	// Warn on missing required values without ever printing their contents.
