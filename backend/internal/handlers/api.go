@@ -74,3 +74,57 @@ func (a *API) GetCongressBySymbol(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{"symbol": symbol, "trades": trades})
 }
+
+// IPOEvaluation is the JSON shape returned for a scored IPO listing.
+type IPOEvaluation struct {
+	Symbol       string     `json:"symbol"`
+	CompanyName  string     `json:"company_name"`
+	ExpectedDate *time.Time `json:"expected_date"`
+	RiskScore    int        `json:"risk_score"`
+	Exchange     string     `json:"exchange"`
+	PriceRange   string     `json:"price_range"`
+	SharesValue  int64      `json:"shares_value"`
+}
+
+// GetIPOs handles GET /api/ipo.
+func (a *API) GetIPOs(c *gin.Context) {
+	rows, err := a.db.Pool.Query(
+		c.Request.Context(),
+		`SELECT symbol, company_name, expected_date, risk_score, exchange, price_range, shares_value
+		   FROM ipo_evaluations
+		  ORDER BY expected_date ASC NULLS LAST
+		  LIMIT 200`,
+	)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load IPOs"})
+		return
+	}
+	defer rows.Close()
+
+	ipos := make([]IPOEvaluation, 0)
+	for rows.Next() {
+		var e IPOEvaluation
+		var exchange, priceRange *string
+		var riskScore *int
+		var sharesValue *int64
+		if err := rows.Scan(&e.Symbol, &e.CompanyName, &e.ExpectedDate, &riskScore, &exchange, &priceRange, &sharesValue); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to read IPOs"})
+			return
+		}
+		if riskScore != nil {
+			e.RiskScore = *riskScore
+		}
+		if exchange != nil {
+			e.Exchange = *exchange
+		}
+		if priceRange != nil {
+			e.PriceRange = *priceRange
+		}
+		if sharesValue != nil {
+			e.SharesValue = *sharesValue
+		}
+		ipos = append(ipos, e)
+	}
+
+	c.JSON(http.StatusOK, gin.H{"ipos": ipos})
+}

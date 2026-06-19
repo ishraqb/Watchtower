@@ -71,6 +71,7 @@ func main() {
 	})
 	router.GET("/ws", hub.HandleWS)
 	router.GET("/api/congress/:symbol", api.GetCongressBySymbol)
+	router.GET("/api/ipo", api.GetIPOs)
 
 	srv := &http.Server{
 		Addr:    ":" + cfg.ServerPort,
