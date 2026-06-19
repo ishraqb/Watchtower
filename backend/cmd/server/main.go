@@ -30,6 +30,16 @@ type wsTickPayload struct {
 	Time   int64   `json:"time"`
 }
 
+// wsSentimentPayload is broadcast when the worker returns a sentiment result.
+type wsSentimentPayload struct {
+	Type           string  `json:"type"`
+	EventID        int     `json:"event_id"`
+	Symbol         string  `json:"symbol"`
+	SentimentScore float64 `json:"sentiment_score"`
+	ArticleCount   int     `json:"article_count"`
+	TopHeadline    string  `json:"top_headline"`
+}
+
 func main() {
 	cfg := config.Load()
 
@@ -64,6 +74,26 @@ func main() {
 	defer producer.Close()
 	detector := anomaly.NewDetector()
 	log.Println("startup: connected to Kafka producer")
+
+	sentimentConsumer, err := kafka.NewConsumer(cfg.KafkaBrokers, "watchtower-backend", func(msg kafka.SentimentMessage) {
+		payload, err := json.Marshal(wsSentimentPayload{
+			Type:           "sentiment",
+			EventID:        msg.EventID,
+			Symbol:         msg.Symbol,
+			SentimentScore: msg.SentimentScore,
+			ArticleCount:   msg.ArticleCount,
+			TopHeadline:    msg.TopHeadline,
+		})
+		if err == nil {
+			hub.Broadcast(payload)
+		}
+	})
+	if err != nil {
+		log.Fatalf("startup: %v", err)
+	}
+	defer sentimentConsumer.Close()
+	go sentimentConsumer.Run(ctx)
+	log.Println("startup: connected to Kafka consumer")
 
 	go consumeTicks(ctx, database, hub, fh, detector, producer)
 
