@@ -18,15 +18,36 @@ The same codebase runs in two configurations, chosen by environment variables - 
 
 Runs the real infrastructure: **Apache Kafka** as the message broker and **TimescaleDB** for tick storage, via Docker.
 
+**Prerequisites:** Docker Desktop, Go 1.26+, Node 22+, and a free Finnhub API key ([finnhub.io](https://finnhub.io), no card required).
+
+**Step 0 - one-time setup:**
+
 ```bash
-cp .env.example .env        # add your free Finnhub API key
-make up                     # start TimescaleDB + Redis + Kafka + Zookeeper
-make backend                # Go API + websocket server
-make worker                 # TypeScript sentiment worker
-make frontend               # SvelteKit dev server
+cp .env.example .env        # then paste your Finnhub key into FINNHUB_API_KEY
+cd frontend && npm install  # and: cd ../sentiment-worker && npm install
 ```
 
-Then open the printed local URL (the SvelteKit dev server). Grab a free Finnhub key at [finnhub.io](https://finnhub.io) - no card required.
+**Then start the four pieces. Each is a long-running process, so give each one its own terminal tab** (leave them running):
+
+```bash
+# terminal 1 - infrastructure (TimescaleDB + Redis + Kafka + Zookeeper)
+make up
+
+# terminal 2 - Go API + websocket server (serves :8080)
+make backend
+
+# terminal 3 - TypeScript sentiment worker (optional; only powers sentiment cards)
+make worker
+
+# terminal 4 - the website (SvelteKit dev server)
+make frontend
+```
+
+**Then open the site at http://localhost:5173** - that's the frontend. (`:8080` is just the backend API, not the page.)
+
+To stop: `Ctrl+C` in each terminal, then `make down` to stop the containers.
+
+> Heads-up: live prices only stream during US market hours. Outside them the dashboard shows each symbol's last close, which is expected - not a bug.
 
 ### 2. On the web (free hosting)
 
