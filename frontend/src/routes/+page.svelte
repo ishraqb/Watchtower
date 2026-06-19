@@ -10,10 +10,21 @@
 		type Tick,
 		type Anomaly
 	} from '$lib/ws';
-	import { createSymbolChart, pushPrice, type SymbolChart } from '$lib/charts';
-	import { getQuote, type Quote } from '$lib/api';
+	import { createSymbolChart, pushPrice, setSeriesData, type SymbolChart } from '$lib/charts';
+	import { getQuote, getHistory, type Quote } from '$lib/api';
 
 	const SYMBOLS = ['AAPL', 'TSLA', 'RIVN'];
+
+	// Robinhood-style ranges. `key` matches the backend allow-list.
+	const RANGES = [
+		{ key: '1h', label: '1H' },
+		{ key: '1d', label: '1D' },
+		{ key: '1w', label: '1W' },
+		{ key: 'ytd', label: 'YTD' },
+		{ key: '1y', label: '1Y' },
+		{ key: '5y', label: '5Y' },
+		{ key: 'max', label: 'MAX' }
+	];
 
 	let containers: Record<string, HTMLDivElement> = {};
 	const charts: Record<string, SymbolChart> = {};
@@ -22,6 +33,29 @@
 	let latestPrices = $state<Record<string, Tick>>({});
 	let anomalyList = $state<Anomaly[]>([]);
 	let quotes = $state<Record<string, Quote>>({});
+	let selectedRange = $state<Record<string, string>>(
+		Object.fromEntries(SYMBOLS.map((s) => [s, '1d']))
+	);
+	let rangeLoading = $state<Record<string, boolean>>({});
+
+	// Whether live ticks should append to a symbol's chart (only on intraday views).
+	function isIntraday(sym: string): boolean {
+		return selectedRange[sym] === '1d' || selectedRange[sym] === '1h';
+	}
+
+	async function loadRange(sym: string, range: string) {
+		selectedRange[sym] = range;
+		rangeLoading[sym] = true;
+		try {
+			const hist = await getHistory(sym, range);
+			const sc = charts[sym];
+			if (sc) setSeriesData(sc, hist.points);
+		} catch {
+			// Leave the existing chart in place on failure.
+		} finally {
+			rangeLoading[sym] = false;
+		}
+	}
 
 	// Whether any live ticks have been received this session.
 	const hasLiveTicks = $derived(Object.keys(latestPrices).length > 0);
@@ -44,6 +78,8 @@
 
 	const unsubTick = latestTick.subscribe((tick) => {
 		if (!tick) return;
+		// Only extend the chart on intraday ranges; longer ranges are historical.
+		if (!isIntraday(tick.symbol)) return;
 		const sc = charts[tick.symbol];
 		if (sc) pushPrice(sc, tick.time, tick.price);
 	});
@@ -72,21 +108,13 @@
 				charts[sym] = createSymbolChart(containers[sym]);
 			}
 		}
-		// Seed each chart with the last-known quote so the dashboard is never
-		// blank when markets are closed. Live ticks (if any) continue from here.
+		// Populate the stats grid (last-known quote) and seed each chart with real
+		// historical data so the dashboard is never blank, even when markets close.
 		for (const sym of SYMBOLS) {
 			getQuote(sym)
-				.then((q) => {
-					quotes[sym] = q;
-					const sc = charts[sym];
-					if (sc && q.open > 0 && q.current > 0) {
-						const now = Math.floor(Date.now() / 1000);
-						// Two-point baseline: today's open → last price.
-						pushPrice(sc, (now - 3600) * 1000, q.open);
-						pushPrice(sc, now * 1000, q.current);
-					}
-				})
+				.then((q) => (quotes[sym] = q))
 				.catch(() => {});
+			loadRange(sym, '1d');
 		}
 		connect();
 	});
@@ -174,6 +202,20 @@
 						{/if}
 
 						<div bind:this={containers[sym]} class="h-64 w-full"></div>
+
+						<div class="mt-2 flex flex-wrap justify-center gap-1">
+							{#each RANGES as r (r.key)}
+								<button
+									class="rounded px-2 py-1 text-xs font-medium transition-colors
+										{selectedRange[sym] === r.key
+										? 'bg-sky-500 text-white'
+										: 'bg-slate-800 text-slate-400 hover:bg-slate-700 hover:text-slate-200'}"
+									onclick={() => loadRange(sym, r.key)}
+								>
+									{r.label}
+								</button>
+							{/each}
+						</div>
 
 						{#if !latestPrices[sym] && quotes[sym]}
 							<p class="mt-2 text-center text-[11px] text-slate-500">

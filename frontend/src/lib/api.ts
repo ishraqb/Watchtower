@@ -24,3 +24,22 @@ export interface Quote {
 export function getQuote(symbol: string): Promise<Quote> {
 	return getJSON<Quote>(`/api/quote/${encodeURIComponent(symbol)}`);
 }
+
+// A single (unix-second, price) sample from GET /api/history.
+export interface HistoryPoint {
+	time: number;
+	value: number;
+}
+
+export interface History {
+	symbol: string;
+	range: string;
+	previous_close: number;
+	points: HistoryPoint[];
+}
+
+export function getHistory(symbol: string, range: string): Promise<History> {
+	return getJSON<History>(
+		`/api/history/${encodeURIComponent(symbol)}?range=${encodeURIComponent(range)}`
+	);
+}

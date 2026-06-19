@@ -54,3 +54,26 @@ export function pushPrice(sc: SymbolChart, epochMillis: number, price: number): 
 	sc.lastTime = time;
 	sc.series.update({ time: time as UTCTimestamp, value: price });
 }
+
+/**
+ * Replaces the entire series with a historical set of (unix-second, price)
+ * points. Used when switching the time-range tab. Colors the line green/red
+ * based on whether the series ends above or below where it started.
+ */
+export function setSeriesData(
+	sc: SymbolChart,
+	points: { time: number; value: number }[]
+): void {
+	const data = points
+		.filter((p) => Number.isFinite(p.time) && Number.isFinite(p.value))
+		.map((p) => ({ time: p.time as UTCTimestamp, value: p.value }));
+
+	if (data.length > 0) {
+		const up = data[data.length - 1].value >= data[0].value;
+		sc.series.applyOptions({ color: up ? '#34d399' : '#f87171' });
+		sc.lastTime = data[data.length - 1].time as number;
+	}
+
+	sc.series.setData(data);
+	sc.chart.timeScale().fitContent();
+}
