@@ -1,7 +1,6 @@
 -- Watchtower initial schema
 -- Runs automatically on first container start via docker-entrypoint-initdb.d
-
-CREATE EXTENSION IF NOT EXISTS timescaledb;
+-- locally, and via `make migrate` against a plain Postgres (e.g. Neon) in prod.
 
 CREATE TABLE IF NOT EXISTS users (
     id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -17,14 +16,26 @@ CREATE TABLE IF NOT EXISTS watchlists (
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- High-frequency tick data — partitioned by time via TimescaleDB hypertable
+-- High-frequency tick data. Locally this becomes a TimescaleDB hypertable
+-- (partitioned by time); on a plain Postgres that lacks the extension it's just
+-- a regular table. Either way the columns, index, and queries are identical.
 CREATE TABLE IF NOT EXISTS market_ticks (
     time   TIMESTAMPTZ NOT NULL,
     symbol VARCHAR NOT NULL,
     price  DECIMAL NOT NULL,
     volume INT NOT NULL
 );
-SELECT create_hypertable('market_ticks', 'time', if_not_exists => TRUE);
+
+-- Only reach for TimescaleDB when it's actually installed, so this same file
+-- runs cleanly against vanilla Postgres (Neon) where the extension isn't offered.
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM pg_available_extensions WHERE name = 'timescaledb') THEN
+        CREATE EXTENSION IF NOT EXISTS timescaledb;
+        PERFORM create_hypertable('market_ticks', 'time', if_not_exists => TRUE);
+    END IF;
+END $$;
+
 CREATE INDEX IF NOT EXISTS idx_market_ticks_symbol_time ON market_ticks (symbol, time DESC);
 
 CREATE TABLE IF NOT EXISTS anomaly_events (

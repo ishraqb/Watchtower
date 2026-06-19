@@ -1,4 +1,4 @@
-.PHONY: up down logs ps restart clean backend worker frontend
+.PHONY: up down logs ps restart clean backend worker frontend migrate
 
 # Start all infrastructure containers in the background
 up:
@@ -34,3 +34,9 @@ worker:
 # Run the SvelteKit frontend locally
 frontend:
 	cd frontend && npm run dev
+
+# Apply the schema to whatever DATABASE_URL points at. Used once to set up the
+# hosted Postgres (Neon), since there's no docker-entrypoint there to auto-run it.
+# Usage: make migrate DATABASE_URL="postgres://..."
+migrate:
+	psql "$(DATABASE_URL)" -f db/migrations/001_init.sql
