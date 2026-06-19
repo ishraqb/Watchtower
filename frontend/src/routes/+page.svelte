@@ -13,7 +13,11 @@
 	import { createSymbolChart, pushPrice, setSeriesData, type SymbolChart } from '$lib/charts';
 	import { getQuote, getHistory, type Quote } from '$lib/api';
 
-	const SYMBOLS = ['AAPL', 'TSLA', 'RIVN'];
+	const DEFAULT_SYMBOLS = ['AAPL', 'TSLA', 'RIVN'];
+	const STORAGE_KEY = 'watchtower:symbols';
+	const MAX_SYMBOLS = 12;
+	// How often to auto-refresh quotes/charts so non-streaming symbols stay live.
+	const POLL_INTERVAL_MS = 20_000;
 
 	// Robinhood-style ranges. `key` matches the backend allow-list.
 	const RANGES = [
@@ -26,35 +30,136 @@
 		{ key: 'max', label: 'MAX' }
 	];
 
-	let containers: Record<string, HTMLDivElement> = {};
+	// Plain (non-reactive) chart registry, managed via a Svelte action so charts
+	// are created/destroyed exactly when a symbol card mounts/unmounts.
 	const charts: Record<string, SymbolChart> = {};
+
+	let symbols = $state<string[]>([...DEFAULT_SYMBOLS]);
+	let newSymbol = $state('');
+	let addError = $state('');
 
 	let status = $state<'connecting' | 'open' | 'closed'>('closed');
 	let latestPrices = $state<Record<string, Tick>>({});
 	let anomalyList = $state<Anomaly[]>([]);
 	let quotes = $state<Record<string, Quote>>({});
-	let selectedRange = $state<Record<string, string>>(
-		Object.fromEntries(SYMBOLS.map((s) => [s, '1d']))
-	);
+	let selectedRange = $state<Record<string, string>>({});
 	let rangeLoading = $state<Record<string, boolean>>({});
+	// Net change over the currently-selected range, keyed by symbol.
+	let rangeChange = $state<Record<string, { change: number; pct: number }>>({});
+
+	let pollTimer: ReturnType<typeof setInterval> | null = null;
+
+	function persistSymbols() {
+		if (typeof window === 'undefined') return;
+		try {
+			window.localStorage.setItem(STORAGE_KEY, JSON.stringify(symbols));
+		} catch {
+			// Storage may be unavailable (private mode); non-fatal.
+		}
+	}
 
 	// Whether live ticks should append to a symbol's chart (only on intraday views).
 	function isIntraday(sym: string): boolean {
 		return selectedRange[sym] === '1d' || selectedRange[sym] === '1h';
 	}
 
-	async function loadRange(sym: string, range: string) {
-		selectedRange[sym] = range;
-		rangeLoading[sym] = true;
+	const rangeLabel = $derived(
+		(sym: string) => RANGES.find((r) => r.key === selectedRange[sym])?.label ?? ''
+	);
+
+	// Fetches history for a range, redraws the chart, and computes the period %.
+	async function fetchAndRender(sym: string, range: string, showLoading: boolean) {
+		if (showLoading) rangeLoading[sym] = true;
 		try {
 			const hist = await getHistory(sym, range);
-			const sc = charts[sym];
-			if (sc) setSeriesData(sc, hist.points);
+			const pts = hist.points;
+			// Guard against a stale poll landing after the user switched ranges.
+			if (charts[sym] && selectedRange[sym] === range) {
+				setSeriesData(charts[sym], pts);
+			}
+			if (pts.length > 0) {
+				const last = pts[pts.length - 1].value;
+				// 1D is measured against the prior close (Robinhood-style); other
+				// ranges are measured against the first point in the window.
+				const base =
+					range === '1d' && hist.previous_close > 0 ? hist.previous_close : pts[0].value;
+				const change = last - base;
+				rangeChange[sym] = { change, pct: base ? (change / base) * 100 : 0 };
+			}
 		} catch {
 			// Leave the existing chart in place on failure.
 		} finally {
-			rangeLoading[sym] = false;
+			if (showLoading) rangeLoading[sym] = false;
 		}
+	}
+
+	function loadRange(sym: string, range: string) {
+		selectedRange[sym] = range;
+		fetchAndRender(sym, range, true);
+	}
+
+	// Loads a symbol's quote + initial chart. Called by the chart action on mount.
+	function initSymbol(sym: string) {
+		if (!selectedRange[sym]) selectedRange[sym] = '1d';
+		getQuote(sym)
+			.then((q) => (quotes[sym] = q))
+			.catch(() => {});
+		fetchAndRender(sym, selectedRange[sym], true);
+	}
+
+	// Svelte action: owns the chart lifecycle for a single symbol card.
+	function chartLifecycle(node: HTMLDivElement, sym: string) {
+		charts[sym] = createSymbolChart(node);
+		initSymbol(sym);
+		return {
+			destroy() {
+				charts[sym]?.chart.remove();
+				delete charts[sym];
+			}
+		};
+	}
+
+	async function addSymbol(e: Event) {
+		e.preventDefault();
+		addError = '';
+		const sym = newSymbol.trim().toUpperCase();
+		if (!/^[A-Z.]{1,10}$/.test(sym)) {
+			addError = 'Enter a valid ticker (letters only, e.g. NVDA).';
+			return;
+		}
+		if (symbols.includes(sym)) {
+			addError = `${sym} is already on your watchlist.`;
+			return;
+		}
+		if (symbols.length >= MAX_SYMBOLS) {
+			addError = `You can track up to ${MAX_SYMBOLS} symbols.`;
+			return;
+		}
+		// Validate the ticker actually exists before adding it.
+		try {
+			const q = await getQuote(sym);
+			if (!q || (q.current === 0 && q.previous_close === 0)) {
+				addError = `Couldn't find a stock with ticker "${sym}".`;
+				return;
+			}
+			quotes[sym] = q;
+		} catch {
+			addError = 'Could not verify that symbol. Please try again.';
+			return;
+		}
+		selectedRange[sym] = '1d';
+		symbols = [...symbols, sym];
+		persistSymbols();
+		newSymbol = '';
+	}
+
+	function removeSymbol(sym: string) {
+		symbols = symbols.filter((s) => s !== sym);
+		persistSymbols();
+		delete quotes[sym];
+		delete selectedRange[sym];
+		delete rangeChange[sym];
+		delete rangeLoading[sym];
 	}
 
 	// Whether any live ticks have been received this session.
@@ -70,6 +175,21 @@
 	function changeColor(change: number | undefined): string {
 		if (change === undefined || change === 0) return 'text-slate-400';
 		return change > 0 ? 'text-emerald-400' : 'text-rose-400';
+	}
+
+	// Periodic refresh so every symbol (including non-streaming, user-added ones)
+	// updates automatically. Symbols actively streaming live ticks on an intraday
+	// view are left to the WebSocket to avoid fighting the real-time series.
+	function refreshAll() {
+		for (const sym of symbols) {
+			getQuote(sym)
+				.then((q) => (quotes[sym] = q))
+				.catch(() => {});
+			const streamingIntraday = status === 'open' && !!latestPrices[sym] && isIntraday(sym);
+			if (!streamingIntraday) {
+				fetchAndRender(sym, selectedRange[sym] ?? '1d', false);
+			}
+		}
 	}
 
 	const unsubStatus = connectionStatus.subscribe((s) => (status = s));
@@ -103,20 +223,20 @@
 	}
 
 	onMount(() => {
-		for (const sym of SYMBOLS) {
-			if (containers[sym]) {
-				charts[sym] = createSymbolChart(containers[sym]);
+		// Restore the user's saved watchlist (charts are created by the action).
+		try {
+			const raw = window.localStorage.getItem(STORAGE_KEY);
+			if (raw) {
+				const saved = JSON.parse(raw);
+				if (Array.isArray(saved) && saved.every((s) => typeof s === 'string') && saved.length) {
+					symbols = saved.slice(0, MAX_SYMBOLS);
+				}
 			}
-		}
-		// Populate the stats grid (last-known quote) and seed each chart with real
-		// historical data so the dashboard is never blank, even when markets close.
-		for (const sym of SYMBOLS) {
-			getQuote(sym)
-				.then((q) => (quotes[sym] = q))
-				.catch(() => {});
-			loadRange(sym, '1d');
+		} catch {
+			// Fall back to defaults on any parse/storage error.
 		}
 		connect();
+		pollTimer = setInterval(refreshAll, POLL_INTERVAL_MS);
 	});
 
 	onDestroy(() => {
@@ -124,7 +244,7 @@
 		unsubPrices();
 		unsubTick();
 		unsubAnomalies();
-		for (const sym of SYMBOLS) charts[sym]?.chart.remove();
+		if (pollTimer) clearInterval(pollTimer);
 		disconnect();
 	});
 
@@ -160,21 +280,54 @@
 
 	<main class="grid grid-cols-1 gap-6 p-6 xl:grid-cols-[1fr_22rem]">
 		<div>
+			<form class="mb-6 flex flex-wrap items-center gap-2" onsubmit={addSymbol}>
+				<input
+					class="w-40 rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm uppercase placeholder:normal-case placeholder:text-slate-500 focus:border-sky-500 focus:outline-none"
+					placeholder="Add ticker (e.g. NVDA)"
+					maxlength="10"
+					bind:value={newSymbol}
+				/>
+				<button
+					type="submit"
+					class="rounded-lg bg-sky-500 px-4 py-2 text-sm font-medium text-white hover:bg-sky-400 disabled:opacity-50"
+					disabled={symbols.length >= MAX_SYMBOLS}
+				>
+					Add
+				</button>
+				{#if addError}
+					<span class="text-sm text-rose-400">{addError}</span>
+				{:else}
+					<span class="text-xs text-slate-500">
+						Tracking {symbols.length}/{MAX_SYMBOLS} · your list is saved in this browser
+					</span>
+				{/if}
+			</form>
+
 			<div class="grid grid-cols-1 gap-6 lg:grid-cols-3">
-				{#each SYMBOLS as sym (sym)}
+				{#each symbols as sym (sym)}
 					<section class="rounded-xl border border-slate-800 bg-slate-900/50 p-4">
 						<div class="mb-2 flex items-baseline justify-between">
-							<h2 class="text-lg font-semibold">{sym}</h2>
+							<div class="flex items-center gap-2">
+								<h2 class="text-lg font-semibold">{sym}</h2>
+								<button
+									class="text-slate-600 hover:text-rose-400"
+									title="Remove {sym}"
+									aria-label="Remove {sym}"
+									onclick={() => removeSymbol(sym)}
+								>
+									✕
+								</button>
+							</div>
 							<div class="text-right">
 								<span class="font-mono text-xl text-sky-400">
 									{displayPrice(sym) !== undefined
 										? `$${displayPrice(sym)!.toFixed(2)}`
 										: '—'}
 								</span>
-								{#if quotes[sym]}
-									<span class="ml-1 font-mono text-xs {changeColor(quotes[sym].change)}">
-										{quotes[sym].change >= 0 ? '+' : ''}{quotes[sym].change.toFixed(2)}
-										({quotes[sym].percent_change.toFixed(2)}%)
+								{#if rangeChange[sym]}
+									<span class="ml-1 font-mono text-xs {changeColor(rangeChange[sym].pct)}">
+										{rangeChange[sym].pct >= 0 ? '+' : ''}{rangeChange[sym].pct.toFixed(2)}%
+										<span class="text-slate-500">{rangeLabel(sym)}</span>
 									</span>
 								{/if}
 							</div>
@@ -201,7 +354,7 @@
 							</div>
 						{/if}
 
-						<div bind:this={containers[sym]} class="h-64 w-full"></div>
+						<div use:chartLifecycle={sym} class="h-64 w-full"></div>
 
 						<div class="mt-2 flex flex-wrap justify-center gap-1">
 							{#each RANGES as r (r.key)}
