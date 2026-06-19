@@ -12,6 +12,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/ishraqb/Watchtower/backend/internal/config"
+	"github.com/ishraqb/Watchtower/backend/internal/congress"
 	"github.com/ishraqb/Watchtower/backend/internal/db"
 	"github.com/ishraqb/Watchtower/backend/internal/finnhub"
 	"github.com/ishraqb/Watchtower/backend/internal/handlers"
@@ -57,11 +58,17 @@ func main() {
 
 	go consumeTicks(ctx, database, hub, fh)
 
+	congressPoller := congress.NewPoller(database)
+	go congressPoller.Start(ctx)
+
+	api := handlers.NewAPI(database)
+
 	router := gin.Default()
 	router.GET("/healthz", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"status": "ok"})
 	})
 	router.GET("/ws", hub.HandleWS)
+	router.GET("/api/congress/:symbol", api.GetCongressBySymbol)
 
 	srv := &http.Server{
 		Addr:    ":" + cfg.ServerPort,
