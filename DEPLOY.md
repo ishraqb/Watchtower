@@ -11,7 +11,7 @@ Everything below is free and needs no credit card.
 
 | Piece | Service | Notes |
 | --- | --- | --- |
-| Frontend (static SPA) | Cloudflare Pages or Netlify | free, permanent |
+| Frontend (static SPA) | Vercel, Cloudflare Pages, or Netlify | free, permanent |
 | Go backend | Render (free web service) | kept awake with a pinger |
 | Sentiment worker | Render (free web service) | woken on demand |
 | Postgres | Neon | free, permanent (Render's free PG expires after 30 days, so don't use it) |
@@ -50,18 +50,37 @@ The repo has a [render.yaml](render.yaml) blueprint that defines both services.
 
 `BROKER=redis` and `GIN_MODE=release` are already set in the blueprint.
 
-## 4. Frontend - Cloudflare Pages or Netlify
+## 4. Frontend - Vercel, Cloudflare Pages, or Netlify
 
-The frontend builds to static files (`adapter-static`). Connect the repo and use:
+The frontend is a client-side SPA, so any static host works. The build adapter
+is chosen automatically: on Vercel it uses `@sveltejs/adapter-vercel` (Vercel
+sets `VERCEL=1` during builds), everywhere else it falls back to
+`@sveltejs/adapter-static` - see `frontend/vite.config.ts`. No manual switch needed.
+
+In all cases set these **build-time** environment variables:
+
+- `VITE_API_BASE` = your backend URL, e.g. `https://watchtower-backend.onrender.com`
+- `VITE_WS_URL` = same host but `wss://` + `/ws`, e.g. `wss://watchtower-backend.onrender.com/ws`
+
+### Option A - Vercel
+
+In **Add New > Project**, import this repo, then set:
+
+- **Root Directory**: `frontend`
+- **Framework Preset**: SvelteKit (auto-detected)
+- **Build Command**: `npm run build` (default) · **Output Directory**: leave default
+- Add the two `VITE_*` env vars above under **Settings > Environment Variables**.
+
+### Option B - Cloudflare Pages or Netlify
+
+Connect the repo and use:
 
 - **Build command**: `npm run build`
 - **Build directory / root**: `frontend`
 - **Output directory**: `build`
-- **Environment variables** (set at build time):
-  - `VITE_API_BASE` = your backend URL, e.g. `https://watchtower-backend.onrender.com`
-  - `VITE_WS_URL` = same host but `wss://` + `/ws`, e.g. `wss://watchtower-backend.onrender.com/ws`
+- Add the two `VITE_*` env vars above.
 
-After it deploys, copy the site URL back into the backend's `ALLOWED_ORIGINS` and redeploy the backend.
+After the frontend deploys, copy its site URL back into the backend's `ALLOWED_ORIGINS` on Render and redeploy the backend.
 
 ## 5. Keep the backend awake - UptimeRobot
 

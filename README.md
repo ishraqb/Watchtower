@@ -67,7 +67,7 @@ To stop: `Ctrl+C` in each terminal, then `make down` to stop the containers.
 
 For a public deployment there's no free managed Kafka and no free Postgres with the TimescaleDB extension, so the hosted build swaps in **Redis Streams** (as the broker) and **plain Postgres** (Neon). It's selected purely with `BROKER=redis`; everything else is identical.
 
-Full step-by-step walkthrough - Neon, Upstash, Render, Cloudflare Pages/Netlify, UptimeRobot - is in [DEPLOY.md](DEPLOY.md). All of it fits on permanent free tiers.
+Full step-by-step walkthrough - Neon, Upstash, Render, Vercel/Cloudflare Pages/Netlify, UptimeRobot - is in [DEPLOY.md](DEPLOY.md). All of it fits on permanent free tiers.
 
 ## Tech stack
 
