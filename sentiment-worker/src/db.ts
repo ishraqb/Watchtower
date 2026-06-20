@@ -3,7 +3,14 @@ import { config } from './config.js';
 
 const { Pool } = pg;
 
-const pool = new Pool({ connectionString: config.databaseUrl });
+// node-postgres doesn't reliably turn on TLS from the connection string's
+// sslmode param, so enable it explicitly for managed Postgres (e.g. Neon) that
+// requires it. Local Docker Postgres uses sslmode=disable and stays plaintext.
+const needsSsl = /sslmode=(require|verify-ca|verify-full)|neon\.tech/.test(config.databaseUrl);
+const pool = new Pool({
+	connectionString: config.databaseUrl,
+	...(needsSsl ? { ssl: { rejectUnauthorized: true } } : {})
+});
 
 export interface SentimentRecord {
 	eventId: number;
